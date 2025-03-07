@@ -2,9 +2,11 @@ import json
 from transformers import AutoTokenizer
 from datasets import Dataset
 import torch
-# Load RoBERTa tokenizer
+import os
+
+# Load RoBERTa tokenizer with add_prefix_space=True
 MODEL_NAME = "roberta-base"
-tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, add_prefix_space=True)
 
 # Define the labels (only keep PERSON)
 LABELS = {"O": 0, "B-PERSON": 1, "I-PERSON": 2}  # Outside, Beginning, Inside
@@ -56,5 +58,13 @@ def preprocess(json_path, save_path):
     tokenized_dataset.save_to_disk(save_path)
     print(f"Preprocessed dataset saved to {save_path}")
 
-# Example usage
-preprocess("data/train.json", "data/tokenized_train")
+# Get absolute paths for better reliability
+script_dir = os.path.dirname(os.path.abspath(__file__))
+project_dir = os.path.dirname(script_dir)
+input_json = os.path.join(project_dir, "data", "json", "conllpp_train.json") 
+output_dir = os.path.join(project_dir, "data", "tokenized_train")
+
+# Create output directory if it doesn't exist
+os.makedirs(os.path.dirname(output_dir), exist_ok=True)
+
+preprocess(input_json, output_dir)
