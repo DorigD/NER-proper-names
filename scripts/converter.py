@@ -15,7 +15,8 @@ def convert_txt_to_json(txt_file_path, json_file_path):
     current_sentence = {"tokens": [], "ner_tags": []}
     line_count = 0
     skipped_lines = 0
-    person_tag_pattern = re.compile(r'.*PERSON.*')  # Match any tag containing "PERSON"
+    # Update the regex if tags use "PER" instead of "PERSON"
+    person_tag_pattern = re.compile(r'.*PER.*')
 
     try:
         with open(txt_file_path, "r", encoding="utf-8") as file:
@@ -55,6 +56,9 @@ def convert_txt_to_json(txt_file_path, json_file_path):
                             tag = "B-PERSON"  # Default to beginning
                             break
                 
+                # Debug print to verify tokens and tags
+                print(f"Word: {word}, Tag: {tag}")
+                                
                 # Convert NER tags to integer labels
                 ner_label = LABELS.get(tag, LABELS["O"])
 
