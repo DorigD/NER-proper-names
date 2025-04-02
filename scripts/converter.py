@@ -4,7 +4,7 @@ import sys
 import re
 
 # Define valid labels (Only keeping PERSON tags)
-LABELS = {"O": 0, "B-PERSON": 1, "I-PERSON": 2}
+LABELS = {"O": 0, "B-PERSON": 1, "I-PERSON": 2} #add Tag for name Titles
 
 # List of titles to remove
 TITLES = {"Mr.", "Mrs.", "Miss", "Ms.", "Dr.", "Prof.", "Sir", "Madam",
