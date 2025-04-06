@@ -1,0 +1,18 @@
+{
+  "eval_person_f1": 0.9898289929585335,
+  "eval_loss": 0.008171943947672844,
+  "eval_accuracy": 0.9983440593127846,
+  "eval_token_precision": 0.9983440593127846,
+  "eval_token_recall": 0.9983440593127846,
+  "eval_token_f1": 0.9983440593127846,
+  "eval_person_precision": 0.9912693082605776,
+  "eval_person_recall": 0.9883928571428572,
+  "eval_b_person_f1": 0.9891992551210428,
+  "eval_i_person_f1": 0.9900990099009901,
+  "eval_entity_precision": 0.19672131147540983,
+  "eval_entity_recall": 0.19657483246463142,
+  "eval_runtime": 4.6435,
+  "eval_samples_per_second": 645.631,
+  "eval_steps_per_second": 40.487,
+  "epoch": 5.0
+}
