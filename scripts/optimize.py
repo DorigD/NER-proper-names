@@ -94,7 +94,7 @@ def objective(trial):
         model=model,
         args=training_args,
         train_dataset=tokenized_dataset["train"],
-        eval_dataset=tokenized_dataset["test"],
+        eval_dataset=tokenized_dataset["validation"],  # Use validation set instead of test
         tokenizer=tokenizer,
         data_collator=data_collator,
         compute_metrics=compute_metrics,
