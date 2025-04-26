@@ -15,7 +15,6 @@ def convert_txt_to_json(txt_file_path, json_file_path):
     current_sentence = {"tokens": [], "ner_tags": []}
     line_count = 0
     skipped_lines = 0
-    # Update the regex if tags use "PER" instead of "PERSON"
     person_tag_pattern = re.compile(r'.*PER.*')
 
     try:

@@ -15,7 +15,21 @@ def load_dataset(json_path):
     """Load dataset from a JSON file."""
     with open(json_path, "r", encoding="utf-8") as file:
         data = json.load(file)
-    return data
+    
+    # Filter out sentences without any PERSON entities
+    filtered_data = []
+    total_sentences = len(data)
+    
+    for sentence in data:
+        # Check if at least one tag is a PERSON entity (1 or 2)
+        if any(tag in [LABELS["B-PERSON"], LABELS["I-PERSON"]] for tag in sentence["ner_tags"]):
+            filtered_data.append(sentence)
+    
+    discarded_count = total_sentences - len(filtered_data)
+    print(f"Discarded {discarded_count} sentences without PERSON entities ({discarded_count/total_sentences*100:.1f}%)")
+    print(f"Kept {len(filtered_data)} sentences with PERSON entities")
+    
+    return filtered_data
 
 def tokenize_and_align_labels(examples):
     """Tokenize text and align NER labels with subword tokens."""
@@ -52,19 +66,10 @@ def tokenize_and_align_labels(examples):
 def preprocess(json_path, save_path):
     """Preprocess dataset and save the tokenized version with train/test splits."""
     data = load_dataset(json_path)
-    print(json.dumps(data[:5], indent=4))  # Print the first 5 examples
-
-    # Inspect a sample to determine the tag format
-    sample_tags = data[0]["ner_tags"] if data else []
-    print(f"Sample tags format: {sample_tags}, type: {type(sample_tags[0]) if sample_tags else None}")
     
-    # Your input data already uses integers that match our desired format (0=O, 1=B-PERSON, 2=I-PERSON)
-    # No need for conversion - just use the tags directly
-    for entry in data:
-        print(f"Original Tags: {entry['ner_tags']}")
-        # The tags are already in the correct format
-        # We're keeping them as is - no conversion needed
-        print(f"Using Tags: {entry['ner_tags']}")
+    # Print sample of filtered data
+    if data:
+        print(json.dumps(data[:3], indent=4))  # Print the first 3 examples
 
     # Create dataset and split into train/test
     dataset = Dataset.from_list(data)
