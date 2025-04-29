@@ -14,23 +14,24 @@ from datasets import load_from_disk
 from sklearn.metrics import precision_recall_fscore_support
 
 # Define paths
-script_dir = os.path.dirname(os.path.abspath(__file__))
-project_dir = os.path.dirname(script_dir)
-dataset_path = os.path.join(project_dir, "data", "tokenized_train")
-model_output_dir = os.path.join(project_dir, "models", "roberta-finetuned-ner")
+SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_DIR = os.path.dirname(SCRIPTS_DIR)
+DATASET_PATH = os.path.join(PROJECT_DIR, "data", "tokenized_train")
+MODEL_OUTPUT_DIR = os.path.join(PROJECT_DIR, "models", "roberta-finetuned-ner")
 
 # Ensure the model output directory exists
-if not os.path.exists(model_output_dir):
-    os.makedirs(model_output_dir)
+if not os.path.exists(MODEL_OUTPUT_DIR):
+    os.makedirs(MODEL_OUTPUT_DIR)
 
 # Constants
 MODEL_NAME = "roberta-base"
-NUM_LABELS = 3  # O, B-PERSON, I-PERSON
-LABELS = {"O": 0, "B-PERSON": 1, "I-PERSON": 2}
+NUM_LABELS = 4  # O, B-PERSON, I-PERSON, TITLE
+LABELS = {"O": 0, "B-PERSON": 1, "I-PERSON": 2, "TITLE": 3}
+
 
 # Load tokenized dataset
 print("Loading tokenized dataset...")
-tokenized_dataset = load_from_disk(dataset_path)
+tokenized_dataset = load_from_disk(DATASET_PATH)
 
 # Load tokenizer
 tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
@@ -60,13 +61,14 @@ def compute_metrics(eval_pred: EvalPrediction):
     return {"f1": f1_micro}
 
 def objective(trial):
-    # Define hyperparameters to optimize
+    # Add learning rate as a hyperparameter
     num_train_epochs = trial.suggest_int("num_train_epochs", 3, 10)
     per_device_train_batch_size = trial.suggest_categorical("per_device_train_batch_size", [8, 16, 32])
     weight_decay = trial.suggest_float("weight_decay", 0.0, 0.3)
+    learning_rate = trial.suggest_float("learning_rate", 1e-5, 5e-5, log=True)
 
     # Use a unique output directory for each trial
-    trial_output_dir = os.path.join(model_output_dir, f"trial-{trial.number}")
+    trial_output_dir = os.path.join(MODEL_OUTPUT_DIR, f"trial-{trial.number}")
     if not os.path.exists(trial_output_dir):
         os.makedirs(trial_output_dir)
 
@@ -76,17 +78,22 @@ def objective(trial):
 
     # Define training arguments
     training_args = TrainingArguments(
-        output_dir=trial_output_dir,  # Use trial-specific output directory
+        output_dir=trial_output_dir,
         num_train_epochs=num_train_epochs,
         per_device_train_batch_size=per_device_train_batch_size,
         weight_decay=weight_decay,
-        evaluation_strategy="epoch",  # Ensure evaluation is done per epoch
-        save_strategy="epoch",        # Match save strategy with evaluation strategy
+        learning_rate=learning_rate,  # Added learning rate
+        evaluation_strategy="epoch",
+        save_strategy="epoch",
         logging_dir=os.path.join(trial_output_dir, "logs"),
         logging_steps=10,
         load_best_model_at_end=True,
         metric_for_best_model="f1",
         greater_is_better=True,
+        # Add gradient clipping to prevent numerical instability
+        max_grad_norm=1.0,
+        # Start with smaller batches for evaluation
+        per_device_eval_batch_size=8,
     )
 
     # Initialize Trainer
@@ -94,7 +101,7 @@ def objective(trial):
         model=model,
         args=training_args,
         train_dataset=tokenized_dataset["train"],
-        eval_dataset=tokenized_dataset["validation"],  # Use validation set instead of test
+        eval_dataset=tokenized_dataset["validation"],  
         tokenizer=tokenizer,
         data_collator=data_collator,
         compute_metrics=compute_metrics,
@@ -108,11 +115,19 @@ def objective(trial):
     return eval_results["eval_f1"]
 
 if __name__ == "__main__":
-    study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=20)
-
-    # Save the best parameters
-    with open(os.path.join(project_dir, "logs", "optuna_study_results.json"), "w") as f:
-        json.dump(study.best_params, f, indent=2)
-
-    print("Best hyperparameters: ", study.best_params)
+    # Enable device-side assertions for better error messages
+    os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
+    
+    try:
+        study = optuna.create_study(direction="maximize",
+                                    pruner=optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=0))
+        study.optimize(objective, n_trials=16, n_jobs=1)
+        
+        # Save the best parameters
+        os.makedirs(os.path.join(PROJECT_DIR, "logs"), exist_ok=True)
+        with open(os.path.join(PROJECT_DIR, "logs", "optuna_study_results.json"), "w") as f:
+            json.dump(study.best_params, f, indent=2)
+        
+        print("Best hyperparameters: ", study.best_params)
+    except Exception as e:
+        print(f"Optimization failed with error: {e}")
