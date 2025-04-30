@@ -70,13 +70,13 @@ def compute_metrics(p: EvalPrediction):
         "token_f1": f1_micro,
         "person_precision": person_metrics[0],
         "person_recall": person_metrics[1],
-        "person_f1": person_metrics[2],
+        "person_token_f1": person_metrics[2],  # Changed name for token-level F1
         "b_person_f1": b_person_metrics[2],
         "i_person_f1": i_person_metrics[2],
         "title_f1": title_metrics[2],
         "entity_precision": entity_results["precision"],
         "entity_recall": entity_results["recall"],
-        "eval_person_f1": entity_results["f1"],  # Using entity-level F1 as main metric
+        "person_entity_f1": entity_results["f1"],  # Renamed for clarity
     }
 
 def compute_entity_level_metrics(true_labels, true_predictions):

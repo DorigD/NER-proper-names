@@ -6,7 +6,7 @@ PROJECT_DIR = os.path.dirname(SCRIPTS_DIR)
 txt_dir = os.path.join(PROJECT_DIR, "data", "txt")
 json_dir = os.path.join(PROJECT_DIR, "data", "json")
 
-def convert_file(input_file_path, output_file_path=os.path.join(json_dir, "result.json"), replace=True):
+def convert_file(input_file_path, output_file_path=os.path.join(json_dir, "result.json"), replace=True, cleanup=True):
     """
     Convert a file from one format to another based on its extension.
     
@@ -17,6 +17,8 @@ def convert_file(input_file_path, output_file_path=os.path.join(json_dir, "resul
     Returns:
         bool: True if conversion was successful, False otherwise.
     """
+    if cleanup and os.path.exists(output_file_path):
+        os.remove(output_file_path)
     try:
         if input_file_path.endswith(".txt"):
             return convert_txt_to_json(input_file_path, output_file_path, replace)
@@ -30,4 +32,3 @@ def convert_file(input_file_path, output_file_path=os.path.join(json_dir, "resul
         return False
 
 
-convert_file(os.path.join(txt_dir, "conllpp_train.txt"))

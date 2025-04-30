@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 
 models/
+data/tokenized_train*
 
 # C extensions
 *.so

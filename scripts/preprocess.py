@@ -1,17 +1,16 @@
 import json
+import shutil  # Add this import
 from transformers import AutoTokenizer
 from datasets import Dataset
-import torch
 import os
 from utils.config import DATA_DIR
-
-# Define the label mapping
-LABELS = {"O": 0, "B-PERSON": 1, "I-PERSON": 2, "TITLE": 3}
 
 # Load RoBERTa tokenizer with add_prefix_space=True
 MODEL_NAME = "roberta-base"
 tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, add_prefix_space=True)
 
+# Define the labels (only keep PERSON)
+LABELS = {"O": 0, "B-PERSON": 1, "I-PERSON": 2}  # Outside, Beginning, Inside
 
 def load_dataset(json_path):
     """Load dataset from a JSON file."""
@@ -32,78 +31,74 @@ def tokenize_and_align_labels(examples):
         prev_word_id = None
         for word_id in word_ids:
             if word_id is None:
-                aligned_labels.append(-100)  # Ignore special tokens (CLS, SEP, etc.)
+                aligned_labels.append(-100)  # Ignore padding tokens
             elif word_id != prev_word_id:
                 aligned_labels.append(label[word_id])  # First subword gets the label
             else:
-                # For subsequent subwords of a token:
+                # Subsequent subwords of B-PERSON should be I-PERSON
                 if label[prev_word_id] == LABELS["B-PERSON"]:
-                    aligned_labels.append(LABELS["I-PERSON"])  # B-PERSON -> I-PERSON
+                    aligned_labels.append(LABELS["I-PERSON"])
+                # Subsequent subwords of I-PERSON remain I-PERSON
                 else:
-                    aligned_labels.append(label[prev_word_id])  # Keep the same label
+                    aligned_labels.append(label[prev_word_id])
             prev_word_id = word_id
-            
         labels.append(aligned_labels)
-        
-
 
     tokenized_inputs["labels"] = labels
     return tokenized_inputs
 
-def preprocess(json_path=os.path.join(DATA_DIR, "json", "result.json"), 
-               save_path=os.path.join(DATA_DIR, "tokenized_train")):
-    """Preprocess dataset and save the tokenized version with train/test splits."""
+def preprocess(json_path=os.path.join(DATA_DIR, "json", "result.json"), save_path=os.path.join(DATA_DIR, "tokenized_train")):
+    """Preprocess dataset and save the tokenized version with train/validation/test splits."""
     data = load_dataset(json_path)
-    print(f"Loaded {len(data)} examples from {json_path}")
     
-    if len(data) > 0:
-
-        # Inspect a sample to determine the tag format
-        sample_tags = data[0]["ner_tags"] if data else []
-
-        
-        # Verify the data format matches our expectations
-        expected_labels = set(LABELS.values())
-        all_labels = set()
-        for entry in data[:100]:  # Check first 100 entries
-            all_labels.update(entry["ner_tags"])
-        
-
+    # Inspect a sample to determine the tag format
+    sample_tags = data[0]["ner_tags"] if data else []
     
-    # Create dataset and split into train/test
+    # Create dataset with three splits: train/validation/test
     dataset = Dataset.from_list(data)
-    split_dataset = dataset.train_test_split(test_size=0.2, seed=42)
     
-    tokenized_dataset = split_dataset.map(
-        tokenize_and_align_labels, 
-        batched=True,
-        batch_size=32,
-        remove_columns=["tokens", "ner_tags"]  # Remove the original columns
-    )
+    # First create train and temp splits (80/20)
+    train_temp_split = dataset.train_test_split(test_size=0.2, seed=42)
     
-    # Ensure the output directory exists
-    os.makedirs(save_path, exist_ok=True)
+    # Then split temp into validation and test (50/50, or 10/10 of original)
+    val_test_split = train_temp_split["test"].train_test_split(test_size=0.5, seed=42)
+    
+    # Create a DatasetDict with all three splits
+    from datasets import DatasetDict
+    split_dataset = DatasetDict({
+        "train": train_temp_split["train"],
+        "validation": val_test_split["train"],
+        "test": val_test_split["test"]
+    })
+    
+    # Tokenize all splits
+    tokenized_dataset = split_dataset.map(tokenize_and_align_labels, batched=True)
     
     # Save the split and tokenized dataset
-   
-    tokenized_dataset.save_to_disk(save_path)
-   
+    if os.path.exists(save_path):
+        try:
+            # Use shutil.rmtree() for directories instead of os.remove()
+            shutil.rmtree(save_path)
+            print(f"Removed existing directory: {save_path}")
+        except Exception as e:
+            print(f"Warning: Could not remove existing directory: {e}")
     
-    # Print dataset statistics
-    print("\nDataset Statistics:")
-    print(f"Training examples: {len(tokenized_dataset['train'])}")
-    print(f"Testing examples: {len(tokenized_dataset['test'])}")
-    print(f"Features: {list(tokenized_dataset['train'].features.keys())}")
+    # Ensure parent directory exists
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    
+    # Save the dataset
+    tokenized_dataset.save_to_disk(save_path)
+    print(f"Preprocessed dataset with train/validation/test splits saved to {save_path}")
 
-
+"""
 # Get absolute paths for better reliability
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_dir = os.path.dirname(script_dir)
-input_json = os.path.join(project_dir, "data", "json", "result.json")
+input_json = os.path.join(project_dir, "data", "json", "conllpp_train.json") 
 output_dir = os.path.join(project_dir, "data", "tokenized_train")
 
 # Create output directory if it doesn't exist
-os.makedirs(output_dir, exist_ok=True)
+os.makedirs(os.path.dirname(output_dir), exist_ok=True)
 
-# Run preprocessing
-preprocess(input_json, output_dir) 
+preprocess(input_json, output_dir)
+"""

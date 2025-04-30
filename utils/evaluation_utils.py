@@ -316,3 +316,22 @@ def analyze_confidence(model, device, test_dataset, all_labels, all_predictions)
     
     return {"mean_confidence_correct": np.mean(correct_conf), 
             "mean_confidence_incorrect": np.mean(wrong_conf) if wrong_conf else 0}
+    
+# Add this function before the evaluate method or at the top of the file
+
+# Replace the existing convert_numpy_to_python_types function with this more robust version
+
+def convert_numpy_to_python_types(obj):
+    """Convert NumPy types to Python native types for JSON serialization"""
+    import numpy as np
+    
+    if isinstance(obj, dict):
+        return {key: convert_numpy_to_python_types(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_numpy_to_python_types(item) for item in obj]
+    elif isinstance(obj, np.ndarray):
+        return convert_numpy_to_python_types(obj.tolist())
+    elif isinstance(obj, np.number):  # This will catch all NumPy numeric types
+        return obj.item()  # Convert to native Python type
+    else:
+        return obj

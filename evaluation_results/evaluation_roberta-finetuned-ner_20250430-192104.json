@@ -1,0 +1,26 @@
+{
+  "model_name": "roberta-finetuned-ner",
+  "timestamp": "20250430-192104",
+  "classification_report": "              precision    recall  f1-score   support\n\n           O     0.9992    0.9994    0.9993     48662\n    B-PERSON     0.9911    0.9911    0.9911      1343\n    I-PERSON     0.9933    0.9911    0.9922      3137\n       TITLE     0.0000    0.0000    0.0000         0\n\n    accuracy                         0.9987     53142\n   macro avg     0.7459    0.7454    0.7456     53142\nweighted avg     0.9987    0.9987    0.9987     53142\n",
+  "entity_metrics": {
+    "precision": 0.9873417721518988,
+    "recall": 0.9866071428571429,
+    "f1": 0.9869743208038706
+  },
+  "error_analysis": {
+    "error_types": {
+      "I-PERSON \u2192 O": 27,
+      "O \u2192 I-PERSON": 20,
+      "O \u2192 B-PERSON": 11,
+      "B-PERSON \u2192 O": 11,
+      "B-PERSON \u2192 I-PERSON": 1,
+      "I-PERSON \u2192 B-PERSON": 1
+    },
+    "partial_matches": 7,
+    "missed_entities": 11
+  },
+  "confidence_stats": {
+    "mean_confidence_correct": 0.9998385310173035,
+    "mean_confidence_incorrect": 0.9297264814376831
+  }
+}

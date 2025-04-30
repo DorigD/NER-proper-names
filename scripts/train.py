@@ -7,27 +7,33 @@ from transformers import (
     Trainer,
     AutoTokenizer,
     DataCollatorForTokenClassification,
-    EvalPrediction
+
 )
+import torch
 from datasets import load_from_disk
+import gc
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 from utils.metrics import compute_metrics, compute_entity_level_metrics, extract_entities
 from utils.config import LABELS, NUM_LABELS, MODEL_NAME, BEST_PARAMS_PATH, DATASET_PATH, MODEL_OUTPUT_DIR, PROJECT_DIR 
 
 def train_model(model_name=MODEL_NAME):
-    # Load tokenized dataset
-    print("Loading tokenized dataset...")
+    
     tokenized_dataset = load_from_disk(DATASET_PATH)
     print(f"Dataset loaded: {tokenized_dataset}")
 
     # Load tokenizer
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 
-    # Prepare model
+    # Prepare model and explicitly move to GPU
     print(f"Loading base model: {model_name}")
     model = AutoModelForTokenClassification.from_pretrained(
         model_name, num_labels=NUM_LABELS
     )
+    if torch.cuda.is_available():
+        model = model.cuda()  # Use this instead of .to(device)
+    
+    # Verify model placement
+    print(f"Model device: {next(model.parameters()).device}")
 
     # Prepare data collator
     data_collator = DataCollatorForTokenClassification(tokenizer=tokenizer)
@@ -41,13 +47,16 @@ def train_model(model_name=MODEL_NAME):
             per_device_eval_batch_size=16,
             warmup_steps=500,
             weight_decay=weight_decay,
-            logging_dir=os.path.join(PROJECT_DIR, "logs"),
+            logging_dir=os.path.join(PROJECT_DIR, "logs", "train"),
             logging_steps=10,
-            evaluation_strategy="epoch",
+            eval_strategy="epoch", 
             save_strategy="epoch",
-            load_best_model_at_end=True,  # Fixed parameter name
-            metric_for_best_model="eval_person_f1",  # Fixed parameter name
+            load_best_model_at_end=True,
+            metric_for_best_model="person_entity_f1",
             greater_is_better=True,
+            no_cuda=False,
+            fp16=torch.cuda.is_available(), 
+            dataloader_num_workers=4,
         )
 
     # Early in the script, try to load best hyperparameters
@@ -81,7 +90,7 @@ def train_model(model_name=MODEL_NAME):
         args=training_args,
         train_dataset=tokenized_dataset["train"],
         eval_dataset=tokenized_dataset["validation"],  # Use validation set during training
-        tokenizer=tokenizer,
+        processing_class=tokenizer,
         data_collator=data_collator,
         compute_metrics=compute_metrics,
     )
@@ -112,6 +121,12 @@ def train_model(model_name=MODEL_NAME):
         }, f, indent=2)
     print(f"Training results saved to {TRAINING_RESULTS_PATH}")
 
+    # Before saving model
+    # Clear cache to free up memory
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    gc.collect()  # Force garbage collection
+
     # Save the model
     trainer.save_model(MODEL_OUTPUT_DIR)  # Fixed method name
     print(f"Model saved to {MODEL_OUTPUT_DIR}")
@@ -129,3 +144,4 @@ def train_model(model_name=MODEL_NAME):
         json.dump(model_config, f, indent=2)
 
     print("Training completed successfully!")
+    

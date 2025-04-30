@@ -43,7 +43,7 @@ class NER:
         self.model.eval()
         return self
 
-    def train(self, training_data):
+    def train(self, training_data=None):
         """
         Train the NER model using the provided training data.
 
@@ -51,7 +51,14 @@ class NER:
         """
         try:
             # Preprocess the training data
-            convert_file(training_data)
+            if training_data is None or os.path.isdir(training_data):
+                training_data = os.path.join(PROJECT_DIR, "data", "raw")
+                for file in os.listdir(training_data):
+                    if file.endswith(".txt") or file.endswith(".csv"):
+                        convert_file(os.path.join(training_data, file), replace=False)
+                        break
+            else:
+                convert_file(training_data)
         except Exception as e:
             print(f"Error during data conversion: {e}")
             return
@@ -248,9 +255,10 @@ class NER:
             analyze_errors, 
             visualize_entity_performance, 
             display_context_examples, 
-            analyze_confidence
+            analyze_confidence,
+            convert_numpy_to_python_types
         )
-        from utils.config import DATASET_PATH
+        from utils.config import DATASET_PATH, MODELS_DIR, PROJECT_DIR
         import os
         from datetime import datetime
         
@@ -368,10 +376,10 @@ class NER:
             "error_analysis": error_analysis,
             "confidence_stats": confidence_stats if visualize else {}
         }
-        
         with open(os.path.join(results_dir, f"evaluation_{model_name}_{timestamp}.json"), "w") as f:
-            json.dump(results, f, indent=2)
-        
+            # Convert NumPy types before serialization
+            serializable_results = convert_numpy_to_python_types(results)
+            json.dump(serializable_results, f, indent=2)
         if visualize:
             print(f"Evaluation results saved to {os.path.join(results_dir, f'evaluation_{model_name}_{timestamp}.json')}")
         
