@@ -1,5 +1,6 @@
 from scripts.converters.converter_txt import convert_txt_to_json
 from scripts.converters.converter_csv import convert_csv_to_json
+from scripts.converters.converter_xml import convert_xml_to_json
 import os
 SCRIPTS_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PROJECT_DIR = os.path.dirname(SCRIPTS_DIR)
@@ -20,13 +21,13 @@ def convert_file(input_file_path, output_file_path=os.path.join(json_dir, "resul
     if cleanup and os.path.exists(output_file_path):
         os.remove(output_file_path)
     try:
-        if input_file_path.endswith(".txt"):
+        if input_file_path.endswith(".txt" or ".conll"):
             return convert_txt_to_json(input_file_path, output_file_path, replace)
         elif input_file_path.endswith(".csv"):
             return convert_csv_to_json(input_file_path, output_file_path, replace)
         else:
-            print(f"Unsupported file format: {input_file_path}")
-            return False
+            convert_xml_to_json(input_file_path, output_file_path, replace)
+            return True
     except Exception as e:
         print(f"Error converting {input_file_path}: {str(e)}")
         return False

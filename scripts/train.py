@@ -15,6 +15,35 @@ import gc
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 from utils.metrics import compute_metrics, compute_entity_level_metrics, extract_entities
 from utils.config import LABELS, NUM_LABELS, MODEL_NAME, BEST_PARAMS_PATH, DATASET_PATH, MODEL_OUTPUT_DIR, PROJECT_DIR 
+from datetime import datetime
+
+def get_next_version_number(base_dir):
+    """
+    Get the next version number by scanning existing version directories.
+    
+    Args:
+        base_dir (str): Base directory to scan for version folders
+        
+    Returns:
+        int: Next version number (1 if no versions exist yet)
+    """
+    if not os.path.exists(base_dir):
+        os.makedirs(base_dir)
+        return 1
+        
+    # Look for directories with pattern "version-X"
+    versions = []
+    for item in os.listdir(base_dir):
+        if os.path.isdir(os.path.join(base_dir, item)) and item.startswith("version-"):
+            try:
+                version_num = int(item.split("-")[1])
+                versions.append(version_num)
+            except (IndexError, ValueError):
+                # Skip if the format doesn't match our expected pattern
+                continue
+    
+    # Return next version number (or 1 if no versions exist)
+    return max(versions, default=0) + 1
 
 def train_model(model_name=MODEL_NAME):
     
@@ -76,9 +105,19 @@ def train_model(model_name=MODEL_NAME):
     except Exception as e:
         print(f"Error loading hyperparameters: {e}, using defaults")
 
+    # Create models base directory if it doesn't exist
+    models_base_dir = os.path.dirname(MODEL_OUTPUT_DIR)
+    os.makedirs(models_base_dir, exist_ok=True)
+    
+    # Get next version number
+    next_version = get_next_version_number(models_base_dir)
+    versioned_output_dir = os.path.join(models_base_dir, f"version-{next_version}-{MODEL_NAME}")
+    
+    print(f"Training model version: {next_version}")
+
     # Create a single training run with the best available parameters
     training_args = create_training_arguments(
-        output_dir=MODEL_OUTPUT_DIR,
+        output_dir=versioned_output_dir,
         num_train_epochs=best_params["num_train_epochs"],
         per_device_train_batch_size=best_params["per_device_train_batch_size"],
         weight_decay=best_params["weight_decay"],
@@ -127,21 +166,42 @@ def train_model(model_name=MODEL_NAME):
         torch.cuda.empty_cache()
     gc.collect()  # Force garbage collection
 
-    # Save the model
-    trainer.save_model(MODEL_OUTPUT_DIR)  # Fixed method name
-    print(f"Model saved to {MODEL_OUTPUT_DIR}")
+    # Save the model to versioned directory
+    trainer.save_model(versioned_output_dir)
+    print(f"Model saved to {versioned_output_dir}")
 
-    # Save model configuration with label mappings for later reference
+    # Save model configuration with label mappings
     model_config = {
-        "base_model": model_name,  # Just store the name, not the model object
+        "base_model": model_name,
         "labels": LABELS,
         "id2label": {str(i): label for label, i in LABELS.items()},
         "label2id": LABELS,
+        "version": next_version
     }
 
     # Save with the expected filename for load_model compatibility
-    with open(os.path.join(MODEL_OUTPUT_DIR, "model_config.json"), "w") as f:
+    with open(os.path.join(versioned_output_dir, "model_config.json"), "w") as f:
         json.dump(model_config, f, indent=2)
-
-    print("Training completed successfully!")
+        
+    # Copy the versioned model to the standard path for easy access
+    import shutil
+    if os.path.exists(MODEL_OUTPUT_DIR):
+        if os.path.isdir(MODEL_OUTPUT_DIR):
+            shutil.rmtree(MODEL_OUTPUT_DIR)
+        else:
+            os.remove(MODEL_OUTPUT_DIR)
     
+    shutil.copytree(versioned_output_dir, MODEL_OUTPUT_DIR)
+    print(f"Model copied to standard location: {MODEL_OUTPUT_DIR}")
+    
+    # Create a version_info.json file at the standard location to track current version
+    with open(os.path.join(models_base_dir, "version_info.json"), "w") as f:
+        json.dump({
+            "current_version": next_version,
+            "latest_model_path": versioned_output_dir,
+            "training_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }, f, indent=2)
+    
+    print("Training completed successfully!")
+    return versioned_output_dir
+
