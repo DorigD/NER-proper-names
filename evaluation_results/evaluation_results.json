@@ -1,8 +1,0 @@
-{
-  "classification_report": "              precision    recall  f1-score   support\n\n           O     0.9985    0.9980    0.9982     17922\n    B-PERSON     0.9905    0.9905    0.9905      1367\n    I-PERSON     0.9934    0.9959    0.9946      3163\n       TITLE     0.8364    0.8519    0.8440        54\n\n    accuracy                         0.9969     22506\n   macro avg     0.9547    0.9591    0.9569     22506\nweighted avg     0.9969    0.9969    0.9969     22506\n",
-  "entity_metrics": {
-    "precision": 0.9754385964912281,
-    "recall": 0.9823321554770318,
-    "f1": 0.9788732394366197
-  }
-}
