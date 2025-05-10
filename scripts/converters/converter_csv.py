@@ -4,24 +4,16 @@ import sys
 import csv
 import ast
 import re
+from utils.config import LABELS, PERSON_TAG_PATTERN, TITLES, SCRIPTS_DIR, PROJECT_DIR
 
-# Define valid labels (Only keeping PERSON tags)
-LABELS = {"O": 0, "B-PERSON": 1, "I-PERSON": 2, "TITLE": 3}
 
-# List of titles to remove
-TITLES = {"Mr.", "Mrs.", "Miss", "Ms.", "Dr.", "Prof.", "Sir", "Madam",
-          "President", "Chancellor", "Minister", "Mayor", "King", "Queen", "Pope"}
-
-SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_DIR = os.path.dirname(SCRIPTS_DIR)
-csv_dir = os.path.join(PROJECT_DIR, "data", "csv")
 json_dir = os.path.join(PROJECT_DIR, "data", "json")
-def convert_csv_to_json(csv_file_path, json_file_path=json_dir+"result.json", replace=True):
+def convert_csv_to_json(csv_file_path, json_file_path=os.path.join(json_dir,"result.json"), replace=True):
     dataset = []
     sentence_count = 0
     skipped_rows = 0
     # Use case-insensitive regex to match person tags
-    person_tag_pattern = re.compile(r'.*per.*', re.IGNORECASE)
+    person_tag_pattern = PERSON_TAG_PATTERN
     
     try:
         with open(csv_file_path, "r", encoding="utf-8") as file:
@@ -42,12 +34,6 @@ def convert_csv_to_json(csv_file_path, json_file_path=json_dir+"result.json", re
                     
                     # Create tokens from the sentence
                     tokens = sentence_text.split()
-                    
-                    # Ensure token count matches tag count
-                    if len(tokens) != len(ner_tags_original):
-                        print(f"Warning: Token count ({len(tokens)}) doesn't match tag count ({len(ner_tags_original)}) in sentence {sentence_num}")
-                        skipped_rows += 1
-                        continue
                     
                     current_sentence = {"tokens": [], "ner_tags": []}
                     
@@ -76,7 +62,7 @@ def convert_csv_to_json(csv_file_path, json_file_path=json_dir+"result.json", re
                                     tag = "I-PERSON"
                         
                         # Debug print to verify tokens and tags
-                        print(f"Word: {token}, Original Tag: {original_tag}, Converted Tag: {tag}")
+                      
                         
                         # Convert NER tags to integer labels
                         ner_label = LABELS.get(tag, LABELS["O"])
@@ -102,7 +88,6 @@ def convert_csv_to_json(csv_file_path, json_file_path=json_dir+"result.json", re
                     existing_data = json.load(existing_file)
                     # Combine existing data with new data
                     dataset = existing_data + dataset
-                    print(f"Appending to existing file with {len(existing_data)} sentences")
             except json.JSONDecodeError:
                 print(f"Warning: Existing file '{json_file_path}' is not valid JSON. Will overwrite.")
         
@@ -111,9 +96,6 @@ def convert_csv_to_json(csv_file_path, json_file_path=json_dir+"result.json", re
             json.dump(dataset, out_file, indent=4, ensure_ascii=False)
         
         action = "Appended to" if not replace and os.path.exists(json_file_path) else "Converted"
-        print(f"{action} '{csv_file_path}' to '{json_file_path}'")
-        print(f"  - Sentences processed: {sentence_count}")
-        print(f"  - Rows skipped: {skipped_rows}")
         return True
         
     except Exception as e:

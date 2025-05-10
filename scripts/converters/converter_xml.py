@@ -2,13 +2,7 @@ import json
 import os
 import sys
 import re
-from utils.config import DATA_DIR
-# Define valid labels (Only keeping PERSON tags)
-LABELS = {"O": 0, "B-PERSON": 1, "I-PERSON": 2, "TITLE": 3}
-
-# List of titles to remove
-TITLES = {"Mr.", "Mrs.", "Miss", "Ms.", "Dr.", "Prof.", "Sir", "Madam",
-          "President", "Chancellor", "Minister", "Mayor", "King", "Queen", "Pope"}
+from utils.config import LABELS, PERSON_TAG_PATTERN, TITLES, DATA_DIR
 
 def convert_xml_to_json(xml_file_path, json_file_path, replace=True):
     dataset = []
@@ -94,7 +88,8 @@ def convert_xml_to_json(xml_file_path, json_file_path, replace=True):
                     pos += closest_tag[0] + len(closest_tag[2])
                     
                     # If it's an entity of interest (PERSON)
-                    if closest_tag[1] == "enamex" and closest_tag[3] == "PERSON":
+                    # Replace direct comparison with regex pattern matching
+                    if closest_tag[1] == "enamex" and closest_tag[3] and PERSON_TAG_PATTERN.match(closest_tag[3]):
                         # Find the corresponding end tag
                         end_tag = f"<e_{closest_tag[1]}>"
                         end_pos = paragraph.find(end_tag, pos)
@@ -204,6 +199,6 @@ def main():
         print(f"Successfully processed {input_file}")
     else:
         print(f"Failed to process {input_file}")
-    
+
 
 

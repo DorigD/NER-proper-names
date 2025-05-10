@@ -2,13 +2,7 @@ import json
 import os
 import sys
 import re
-
-# Define valid labels (Only keeping PERSON tags)
-LABELS = {"O": 0, "B-PERSON": 1, "I-PERSON": 2, "TITLE": 3}
-
-# List of titles to remove
-TITLES = {"Mr.", "Mrs.", "Miss", "Ms.", "Dr.", "Prof.", "Sir", "Madam",
-          "President", "Chancellor", "Minister", "Mayor", "King", "Queen", "Pope"}
+from utils.config import LABELS, PERSON_TAG_PATTERN, TITLES
 
 
 def convert_txt_to_json(txt_file_path, json_file_path, replace=True):
@@ -16,7 +10,7 @@ def convert_txt_to_json(txt_file_path, json_file_path, replace=True):
     current_sentence = {"tokens": [], "ner_tags": []}
     line_count = 0
     skipped_lines = 0
-    person_tag_pattern = re.compile(r'.*PER.*')
+    person_tag_pattern = PERSON_TAG_PATTERN
 
     try:
         with open(txt_file_path, "r", encoding="utf-8") as file:

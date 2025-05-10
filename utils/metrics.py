@@ -1,6 +1,7 @@
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 import numpy as np
 from transformers import EvalPrediction
+from collections import Counter
 
 
 def compute_metrics(p: EvalPrediction):
@@ -17,51 +18,76 @@ def compute_metrics(p: EvalPrediction):
         for label in labels
     ]
     
+    # Add diagnostic logging
+    all_true_labels = [l for sublist in true_labels for l in sublist]
+    all_predictions = [p for sublist in true_predictions for p in sublist]
+    
+    # Count occurrences
+    true_label_counts = Counter(all_true_labels)
+    pred_label_counts = Counter(all_predictions)
+    
+    print(f"True label counts: {true_label_counts}")
+    print(f"Predicted label counts: {pred_label_counts}")
+    
+    # Check if any person labels are predicted at all
+    person_labels_predicted = sum(1 for p in all_predictions if p in [1, 2])
+    print(f"Person labels in predictions: {person_labels_predicted}")
+    person_labels_true = sum(1 for l in all_true_labels if l in [1, 2])
+    print(f"Person labels in true labels: {person_labels_true}")
+    
     # Token-level metrics
     precision_micro, recall_micro, f1_micro, _ = precision_recall_fscore_support(
-        [l for sublist in true_labels for l in sublist],
-        [p for sublist in true_predictions for p in sublist],
-        average="micro"
+        all_true_labels,
+        all_predictions,
+        average="micro",
+        zero_division=0
     )
     
     # Separate metrics for B-PERSON and I-PERSON
     b_person_metrics = precision_recall_fscore_support(
-        [l for sublist in true_labels for l in sublist],
-        [p for sublist in true_predictions for p in sublist],
+        all_true_labels,
+        all_predictions,
         labels=[1],  # B-PERSON only
-        average="micro"  # Changed from "binary" to "micro"
+        average="micro",
+        zero_division=0
     )
     
     i_person_metrics = precision_recall_fscore_support(
-        [l for sublist in true_labels for l in sublist],
-        [p for sublist in true_predictions for p in sublist],
+        all_true_labels,
+        all_predictions,
         labels=[2],  # I-PERSON only
-        average="micro"  # Changed from "binary" to "micro"
+        average="micro",
+        zero_division=0
     )
     
     # Title metrics
     title_metrics = precision_recall_fscore_support(
-        [l for sublist in true_labels for l in sublist],
-        [p for sublist in true_predictions for p in sublist],
+        all_true_labels,
+        all_predictions,
         labels=[3],  # TITLE only
-        average="micro"
+        average="micro",
+        zero_division=0
     )
     
     # Combined PERSON entity metrics
     person_metrics = precision_recall_fscore_support(
-        [l for sublist in true_labels for l in sublist],
-        [p for sublist in true_predictions for p in sublist],
+        all_true_labels,
+        all_predictions,
         labels=[1, 2],  # Both B-PERSON and I-PERSON
-        average="micro"
+        average="micro",
+        zero_division=0
     )
     
     # Entity-level span evaluation (more realistic evaluation)
     entity_results = compute_entity_level_metrics(true_labels, true_predictions)
     
     accuracy = accuracy_score(
-        [l for sublist in true_labels for l in sublist],
-        [p for sublist in true_predictions for p in sublist]
+        all_true_labels,
+        all_predictions
     )
+    
+    # Calculate weighted F1 score for optimization (focusing on person entities)
+    weighted_f1 = f1_micro * 0.3 + person_metrics[2] * 0.7
     
     return {
         "accuracy": accuracy,
@@ -70,13 +96,14 @@ def compute_metrics(p: EvalPrediction):
         "token_f1": f1_micro,
         "person_precision": person_metrics[0],
         "person_recall": person_metrics[1],
-        "person_token_f1": person_metrics[2],  # Changed name for token-level F1
+        "person_token_f1": person_metrics[2],
         "b_person_f1": b_person_metrics[2],
         "i_person_f1": i_person_metrics[2],
         "title_f1": title_metrics[2],
         "entity_precision": entity_results["precision"],
         "entity_recall": entity_results["recall"],
-        "person_entity_f1": entity_results["f1"],  # Renamed for clarity
+        "person_entity_f1": entity_results["f1"],
+        "weighted_f1": weighted_f1,  
     }
 
 def compute_entity_level_metrics(true_labels, true_predictions):

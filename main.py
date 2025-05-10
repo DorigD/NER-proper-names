@@ -6,12 +6,15 @@ import json
 
 # Then import transformers
 from transformers import AutoModelForTokenClassification, AutoTokenizer
-
+import transformers
 # Finally import your local modules
 from utils.config import PROJECT_DIR
 from scripts.train import train_model
 from scripts.preprocess import preprocess
 from scripts.converters.Converter import convert_file
+transformers.logging.set_verbosity_error() 
+import warnings
+warnings.filterwarnings("ignore")
 class NER:
     def __init__(self):
         """
@@ -132,7 +135,7 @@ class NER:
         self.model.eval()    
         return self
 
-    def train(self, training_data=None, replace=True, optimize=True):
+    def train(self, training_data=None, replace=True, optimize=True, save_train="default"):
         """
         Train the NER model using the provided training data.
 
@@ -153,7 +156,7 @@ class NER:
             return
         try:
             # Preprocess the training data
-            preprocess()
+            preprocess(ds_name=save_train)
         except Exception as e:
             print(f"Error during data preprocessing: {e}")
             return
@@ -165,7 +168,14 @@ class NER:
             except Exception as e:
                 print(f"Error during hyperparameter optimization: {e}")
                 return
-        return train_model(self.model if self.model else self.base_model)
+            
+        # Always pass a model name string, not a model object
+        model_name = self.base_model
+        # If model exists, extract the model name from its config
+        if self.model and hasattr(self.model.config, "_name_or_path"):
+            model_name = self.model.config._name_or_path
+        
+        return train_model(model_name)
 
     def set_model(self, model_path):
         """
@@ -199,8 +209,10 @@ class NER:
         import numpy as np
         import os
         import json
+        import tempfile
         from datetime import datetime
-        from utils.config import PROJECT_DIR, DATASET_PATH
+        from utils.config import PROJECT_DIR, DATASET_PATH, BEST_PARAMS_PATH
+        from utils.metrics import compute_metrics
         
         # Ensure we have a tokenized dataset
         dataset_path = DATASET_PATH
@@ -212,39 +224,15 @@ class NER:
         print("Loading tokenized dataset...")
         tokenized_dataset = load_from_disk(dataset_path)
         
-        # Create optimization output directory
+        # Create only one results directory for final results
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        optim_dir = os.path.join(PROJECT_DIR, "optimization", f"optim-{timestamp}")
-        os.makedirs(optim_dir, exist_ok=True)
+        results_dir = os.path.join(PROJECT_DIR, "optimization")
+        os.makedirs(results_dir, exist_ok=True)
         
         # Load tokenizer if not already loaded
         if self.tokenizer is None:
             from transformers import AutoTokenizer
             self.tokenizer = AutoTokenizer.from_pretrained(self.base_model)
-            
-        # Define metrics computation
-        def compute_metrics(eval_pred: EvalPrediction):
-            predictions, labels = eval_pred.predictions, eval_pred.label_ids
-            true_predictions = np.argmax(predictions, axis=2)
-            true_labels = labels
-
-            # Remove ignored index (special tokens)
-            true_predictions = [
-                [p for (p, l) in zip(pred, label) if l != -100] 
-                for pred, label in zip(true_predictions, true_labels)
-            ]
-            true_labels = [
-                [l for l in label if l != -100]
-                for label in true_labels
-            ]
-
-            precision_micro, recall_micro, f1_micro, _ = precision_recall_fscore_support(
-                [l for sublist in true_labels for l in sublist],
-                [p for sublist in true_predictions for p in sublist],
-                average="micro"
-            )
-            
-            return {"f1": f1_micro}
             
         # Define the optimization objective
         def objective(trial):
@@ -254,58 +242,75 @@ class NER:
             weight_decay = trial.suggest_float("weight_decay", 0.0, 0.3)
             learning_rate = trial.suggest_float("learning_rate", 1e-5, 5e-5, log=True)
             
-            # Create a directory for this trial
-            trial_dir = os.path.join(optim_dir, f"trial-{trial.number}")
-            os.makedirs(trial_dir, exist_ok=True)
+            # Add these parameters to trial
+            person_weight = trial.suggest_float("person_weight", 3.0, 7.0)  # Try different person weights
             
-            # Get the number of labels from the config
-            from utils.config import ID2LABEL
-            num_labels = len(ID2LABEL)
-            
-            # Prepare model
-            model = AutoModelForTokenClassification.from_pretrained(
-                self.base_model, 
-                num_labels=num_labels
-            )
-            
-            # Data collator for NER
-            data_collator = DataCollatorForTokenClassification(tokenizer=self.tokenizer)
-            
-            # Define training arguments
-            training_args = TrainingArguments(
-                output_dir=trial_dir,
-                num_train_epochs=num_train_epochs,
-                per_device_train_batch_size=per_device_train_batch_size,
-                weight_decay=weight_decay,
-                learning_rate=learning_rate,
-                eval_strategy="epoch",
-                save_strategy="epoch",
-                logging_dir=os.path.join(trial_dir, "logs"),
-                logging_steps=10,
-                load_best_model_at_end=True,
-                metric_for_best_model="f1",
-                greater_is_better=True,
-                max_grad_norm=1.0,
-                per_device_eval_batch_size=8,
-            )
-            
-            # Initialize Trainer
-            trainer = Trainer(
-                model=model,
-                args=training_args,
-                train_dataset=tokenized_dataset["train"],
-                eval_dataset=tokenized_dataset["validation"],
-                tokenizer=self.tokenizer,
-                data_collator=data_collator,
-                compute_metrics=compute_metrics,
-            )
-            
-            # Train the model
-            trainer.train()
-            
-            # Evaluate the model
-            eval_results = trainer.evaluate()
-            return eval_results["eval_f1"]
+            # Use a temporary directory for this trial that will be cleaned up automatically
+            with tempfile.TemporaryDirectory() as trial_dir:
+                print(f"Trial {trial.number} using temporary directory: {trial_dir}")
+                
+                # Get the number of labels from the config
+                from utils.config import ID2LABEL
+                num_labels = len(ID2LABEL)
+                
+                # Prepare model
+                model = AutoModelForTokenClassification.from_pretrained(
+                    self.base_model, 
+                    num_labels=num_labels
+                )
+                
+                # Apply class weights during training
+                class_weights = torch.ones(num_labels)
+                class_weights[0] = 0.5  # Reduce weight for "O" tag
+                class_weights[1] = person_weight  # Use the optimized person weight
+                class_weights[2] = person_weight * 0.6  # I-PERSON slightly lower
+                class_weights[3] = 1.5  # Small increase for TITLE
+                
+                model.config.class_weights = class_weights.tolist()
+                
+                # Data collator for NER
+                data_collator = DataCollatorForTokenClassification(tokenizer=self.tokenizer)
+                
+                # Define training arguments with minimal disk usage
+                training_args = TrainingArguments(
+                    output_dir=trial_dir,
+                    num_train_epochs=num_train_epochs,
+                    per_device_train_batch_size=per_device_train_batch_size,
+                    weight_decay=weight_decay,
+                    learning_rate=learning_rate,
+                    eval_strategy="epoch",
+                    save_strategy="no", 
+                    logging_strategy="no",
+                    load_best_model_at_end=False, 
+                    metric_for_best_model="weighted_f1",
+                    greater_is_better=True,
+                    max_grad_norm=1.0,
+                    per_device_eval_batch_size=8,
+                    report_to="none",
+                )
+                
+                # Initialize Trainer
+                trainer = Trainer(
+                    model=model,
+                    args=training_args,
+                    train_dataset=tokenized_dataset["train"],
+                    eval_dataset=tokenized_dataset["validation"],
+                    tokenizer=self.tokenizer,
+                    data_collator=data_collator,
+                    compute_metrics=compute_metrics,  # Use the imported function
+                )
+                
+                # Train the model
+                trainer.train()
+                
+                # Evaluate the model
+                eval_results = trainer.evaluate()
+                
+                # Clean up GPU memory after each trial
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    
+                return eval_results["eval_weighted_f1"]  # This matches our new metric name
         
         # Create and run Optuna study
         print(f"Starting hyperparameter optimization with {n_trials} trials...")
@@ -313,9 +318,6 @@ class NER:
             direction="maximize",
             pruner=optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=0)
         )
-        
-        # Enable device-side assertions for better error messages
-        os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
         
         try:
             # Run optimization
@@ -325,7 +327,7 @@ class NER:
             best_params = study.best_params
             best_value = study.best_value
             
-            # Save optimization results
+            # Save only the final optimization results
             results = {
                 "best_params": best_params,
                 "best_f1_score": best_value,
@@ -334,41 +336,22 @@ class NER:
                 "n_trials": n_trials,
             }
             
-            with open(os.path.join(optim_dir, "optimization_results.json"), "w") as f:
+            os.makedirs(os.path.dirname(BEST_PARAMS_PATH), exist_ok=True)
+            with open(BEST_PARAMS_PATH, "w") as f:
                 json.dump(results, f, indent=2)
+            
+            
             
             # Visualization if requested
             if visualize:
-                # Print results
+                # Print results only
                 print(f"\nOptimization Results:\n{'-'*20}")
                 print(f"Best F1 Score: {best_value:.4f}")
                 print("Best hyperparameters:")
                 for param, value in best_params.items():
                     print(f"  {param}: {value}")
-                    
-                # Plot optimization history
-                try:
-                    import matplotlib.pyplot as plt
-                    
-                    # Plot optimization history
-                    plt.figure(figsize=(10, 6))
-                    optuna.visualization.matplotlib.plot_optimization_history(study)
-                    plt.tight_layout()
-                    plt.savefig(os.path.join(optim_dir, "optimization_history.png"))
-                    
-                    # Plot parameter importances if there are enough trials
-                    if n_trials >= 5:
-                        plt.figure(figsize=(10, 6))
-                        optuna.visualization.matplotlib.plot_param_importances(study)
-                        plt.tight_layout()
-                        plt.savefig(os.path.join(optim_dir, "parameter_importance.png"))
-                        
-                    # Show plots
-                    plt.show()
-                except Exception as e:
-                    print(f"Error creating visualizations: {e}")
             
-            print(f"Optimization complete. Results saved to {optim_dir}")
+            print(f"Optimization complete. Results saved to {results_dir}")
             return results
         except Exception as e:
             print(f"Optimization failed with error: {e}")
@@ -536,7 +519,7 @@ class NER:
         with different transformer models, including those not fine-tuned by this code.
         
         Args:
-            test_dataset: HuggingFace dataset for testing. If None, will load from default path.
+            test_dataset: HuggingFace dataset for testing or path to dataset. If None, will load from default path.
             visualize: Whether to generate and display visualizations
         
         Returns:
@@ -571,9 +554,26 @@ class NER:
         results_dir = os.path.join(main_results_dir, clean_model_name)
         os.makedirs(results_dir, exist_ok=True)
         
-        # Load test dataset if not provided
-        if test_dataset is None:
+        # Handle test_dataset - load from disk if a path is provided
+        if isinstance(test_dataset, str) and os.path.isdir(test_dataset):
+            print(f"Loading dataset from directory: {test_dataset}")
+            loaded_dataset = load_from_disk(test_dataset)
+            if "test" in loaded_dataset:
+                test_dataset = loaded_dataset["test"]
+                print(f"Successfully loaded test split with {len(test_dataset)} examples")
+            else:
+                # Try to get the first split if 'test' is not available
+                first_split = next(iter(loaded_dataset.keys()), None)
+                if first_split:
+                    test_dataset = loaded_dataset[first_split]
+                    print(f"No 'test' split found. Using '{first_split}' split with {len(test_dataset)} examples")
+                else:
+                    print("Failed to find any valid splits in the dataset")
+                    return None
+        elif test_dataset is None:
+            # Load default test dataset
             test_dataset = load_from_disk(DATASET_PATH)["test"]
+            print(f"Using default test dataset with {len(test_dataset)} examples")
         
         # Initialize metrics
         seqeval = evaluate.load("seqeval")
@@ -698,4 +698,4 @@ class NER:
         except Exception as e:
             print(f"Error during evaluation with Trainer: {e}")
             print("Falling back to manual evaluation method...")
-            return self.evaluate(test_dataset, visualize)
+            return
