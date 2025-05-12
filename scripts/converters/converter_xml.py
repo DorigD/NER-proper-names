@@ -53,7 +53,10 @@ def convert_xml_to_json(xml_file_path, json_file_path, replace=True):
                             if token.strip():  # Skip empty tokens
                                 if token in TITLES:
                                     current_sentence["tokens"].append(token)
-                                    current_sentence["ner_tags"].append(LABELS["TITLE"])
+                                    if "TITLE" in LABELS:
+                                        current_sentence["ner_tags"].append(LABELS["TITLE"])
+                                    else:
+                                        current_sentence["ner_tags"].append(LABELS["O"])
                                 else:
                                     current_sentence["tokens"].append(token)
                                     current_sentence["ner_tags"].append(LABELS["O"])
@@ -79,7 +82,10 @@ def convert_xml_to_json(xml_file_path, json_file_path, replace=True):
                             if token.strip():  # Skip empty tokens
                                 if token in TITLES:
                                     current_sentence["tokens"].append(token)
-                                    current_sentence["ner_tags"].append(LABELS["TITLE"])
+                                    if "TITLE" in LABELS:
+                                        current_sentence["ner_tags"].append(LABELS["TITLE"])
+                                    else:
+                                        current_sentence["ner_tags"].append(LABELS["O"])
                                 else:
                                     current_sentence["tokens"].append(token)
                                     current_sentence["ner_tags"].append(LABELS["O"])
@@ -102,9 +108,12 @@ def convert_xml_to_json(xml_file_path, json_file_path, replace=True):
                             # Add entity tokens with proper BIO tags
                             for i, token in enumerate(entity_tokens):
                                 if token.strip():  # Skip empty tokens
-                                    if token in TITLES:
+                                    if token.lower() in TITLES:
                                         current_sentence["tokens"].append(token)
-                                        current_sentence["ner_tags"].append(LABELS["TITLE"])
+                                        if "TITLE" in LABELS:
+                                            current_sentence["ner_tags"].append(LABELS["TITLE"])
+                                        else:
+                                            current_sentence["ner_tags"].append(LABELS["O"])
                                     else:
                                         current_sentence["tokens"].append(token)
                                         if i == 0:
@@ -130,12 +139,8 @@ def convert_xml_to_json(xml_file_path, json_file_path, replace=True):
                             # Add tokens as non-entities
                             for token in entity_tokens:
                                 if token.strip():  # Skip empty tokens
-                                    if token in TITLES:
-                                        current_sentence["tokens"].append(token)
-                                        current_sentence["ner_tags"].append(LABELS["TITLE"])
-                                    else:
-                                        current_sentence["tokens"].append(token)
-                                        current_sentence["ner_tags"].append(LABELS["O"])
+                                    current_sentence["tokens"].append(token)
+                                    current_sentence["ner_tags"].append(LABELS["O"])
                             
                             # Move past the entity and its end tag
                             pos = end_pos + len(end_tag)

@@ -32,26 +32,36 @@ def convert_txt_to_json(txt_file_path, json_file_path, replace=True):
                 # Always take the first item as the word/token
                 word = parts[0]
                 
-                # Check if word is a title
-                if word in TITLES:
-                    # Add title with special tag instead of skipping
-                    current_sentence["tokens"].append(word)
-                    current_sentence["ner_tags"].append(LABELS["TITLE"])
-                    continue
-                
-                # Find a tag containing "PERSON" or default to "O"
-                tag = "O"
+                # First determine what the original tag would be
+                original_tag = "O"  # Default to O
                 for part in parts[1:]:  # Look through all columns after the word
                     if person_tag_pattern.match(part):
-                        if part.startswith("B-"):
-                            tag = "B-PERSON"
-                            break
-                        elif part.startswith("I-"):
-                            tag = "I-PERSON"
-                            break
-                        else:  # Handle just "PERSON" without B- or I- prefix
-                            tag = "B-PERSON"  # Default to beginning
-                            break
+                        original_tag = part
+                        break
+                    elif part != "O" and re.match(r'(B|I)-\w+', part):
+                        # This is some other entity type (not O and not PERSON)
+                        original_tag = part
+                        break
+                
+                # Check if word is a title AND tag is either O or PERSON-related
+                if word.lower() in TITLES and (original_tag == "O" or person_tag_pattern.match(original_tag)):
+                    # Add title with special tag instead of skipping
+                    current_sentence["tokens"].append(word)
+                    if "TITLE" in LABELS:
+                        current_sentence["ner_tags"].append(LABELS["TITLE"])
+                    else:
+                        current_sentence["ner_tags"].append(LABELS["O"])
+                    continue
+                
+                # Process tag for non-title words
+                tag = "O"
+                if person_tag_pattern.match(original_tag):
+                    if original_tag.startswith("B-"):
+                        tag = "B-PERSON"
+                    elif original_tag.startswith("I-"):
+                        tag = "I-PERSON"
+                    else:  # Handle just "PERSON" without B- or I- prefix
+                        tag = "B-PERSON"  # Default to beginning
                 
             
                                 

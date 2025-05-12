@@ -14,7 +14,7 @@ def convert_csv_to_json(csv_file_path, json_file_path=os.path.join(json_dir,"res
     skipped_rows = 0
     # Use case-insensitive regex to match person tags
     person_tag_pattern = PERSON_TAG_PATTERN
-    
+   
     try:
         with open(csv_file_path, "r", encoding="utf-8") as file:
             reader = csv.reader(file)
@@ -38,11 +38,14 @@ def convert_csv_to_json(csv_file_path, json_file_path=os.path.join(json_dir,"res
                     current_sentence = {"tokens": [], "ner_tags": []}
                     
                     for i, (token, original_tag) in enumerate(zip(tokens, ner_tags_original)):
-                        # Check if token is a title
-                        if token in TITLES:
+                        # Check if token is a title and original tag is either O or PERSON-related
+                        if token.lower() in TITLES and (original_tag == "O" or person_tag_pattern.match(original_tag)):
                             # Add title with special tag instead of skipping
                             current_sentence["tokens"].append(token)
-                            current_sentence["ner_tags"].append(LABELS["TITLE"])
+                            if "TITLE" in LABELS:
+                                current_sentence["ner_tags"].append(LABELS["TITLE"])
+                            else:
+                                current_sentence["ner_tags"].append(LABELS["O"])
                             continue
                         
                         # Default tag is "O"

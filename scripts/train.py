@@ -116,7 +116,8 @@ def train_model(model_name=MODEL_NAME):
     class_weights[0] = 0.3  # Reduce weight for "O" tag
     class_weights[1] = person_weight  # Use optimized weight for B-PERSON
     class_weights[2] = person_weight * 0.6  # I-PERSON proportional to B-PERSON
-    class_weights[3] = 1.5  # Small increase for TITLE
+    if "TITLE" in LABELS:
+        class_weights[3] = 1.5  # Small increase for TITLE
 
     # Apply class weights to the model's loss function
     model.config.class_weights = class_weights.tolist()

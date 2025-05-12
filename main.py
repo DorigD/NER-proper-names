@@ -250,7 +250,7 @@ class NER:
                 print(f"Trial {trial.number} using temporary directory: {trial_dir}")
                 
                 # Get the number of labels from the config
-                from utils.config import ID2LABEL
+                from utils.config import ID2LABEL, LABELS
                 num_labels = len(ID2LABEL)
                 
                 # Prepare model
@@ -264,7 +264,8 @@ class NER:
                 class_weights[0] = 0.5  # Reduce weight for "O" tag
                 class_weights[1] = person_weight  # Use the optimized person weight
                 class_weights[2] = person_weight * 0.6  # I-PERSON slightly lower
-                class_weights[3] = 1.5  # Small increase for TITLE
+                if "TITLE" in LABELS:
+                    class_weights[3] = 1.5  # Small increase for TITLE
                 
                 model.config.class_weights = class_weights.tolist()
                 
