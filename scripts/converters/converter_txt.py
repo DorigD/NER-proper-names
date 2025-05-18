@@ -34,14 +34,21 @@ def convert_txt_to_json(txt_file_path, json_file_path, replace=True):
                 
                 # First determine what the original tag would be
                 original_tag = "O"  # Default to O
-                for part in parts[1:]:  # Look through all columns after the word
+                found_person_tag = False
+                
+                # First pass: look for person tags
+                for part in parts[1:]:
                     if person_tag_pattern.match(part):
                         original_tag = part
+                        found_person_tag = True
                         break
-                    elif part != "O" and re.match(r'(B|I)-\w+', part):
-                        # This is some other entity type (not O and not PERSON)
-                        original_tag = part
-                        break
+                
+                # Only look for other entity tags if no person tag was found
+                if not found_person_tag:
+                    for part in parts[1:]:
+                        if part != "O" and re.match(r'(B|I)-\w+', part):
+                            original_tag = part
+                            break
                 
                 # Check if word is a title AND tag is either O or PERSON-related
                 if word.lower() in TITLES and (original_tag == "O" or person_tag_pattern.match(original_tag)):

@@ -8,6 +8,7 @@ from utils.config import DATA_DIR, LABELS, AVOIDED_symbols
 # Load RoBERTa tokenizer with add_prefix_space=True
 MODEL_NAME = "roberta-base"
 tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, add_prefix_space=True)
+
 def split_text_into_manageable_chunks(data, max_tokens=100):
     """Split text using punctuation when possible, fallback to fixed chunks"""
     new_data = []
@@ -64,6 +65,32 @@ def load_dataset(json_path):
         data = json.load(file)
     return data
 
+def fix_bio_sequences(data):
+    """
+    Fix invalid BIO sequences by converting I-PERSON tags to B-PERSON tags 
+    when they don't follow a B-PERSON or I-PERSON tag.
+    """
+    fixed_data = []
+    
+    for example in data:
+        fixed_tags = example["ner_tags"].copy()
+        tokens = example["tokens"]
+        
+        for i in range(len(fixed_tags)):
+            # If current tag is I-PERSON
+            if fixed_tags[i] == LABELS["I-PERSON"]:
+                # Check if it's the first token or previous token was not a PERSON entity
+                if i == 0 or (fixed_tags[i-1] != LABELS["B-PERSON"] and fixed_tags[i-1] != LABELS["I-PERSON"]):
+                    # Convert to B-PERSON
+                    fixed_tags[i] = LABELS["B-PERSON"]
+        
+        fixed_data.append({
+            "tokens": tokens,
+            "ner_tags": fixed_tags
+        })
+    
+    return fixed_data
+
 def tokenize_and_align_labels(examples):
     """Tokenize text and align NER labels with subword tokens."""
     tokenized_inputs = tokenizer(
@@ -115,9 +142,42 @@ def preprocess(json_path=os.path.join(DATA_DIR, "json", "result.json"),
     """
     data = load_dataset(json_path)
     
+    # Fix invalid BIO sequences
+    data = fix_bio_sequences(data)
+    
+    # Split into manageable chunks
+    data = split_text_into_manageable_chunks(data)
+    
+    # Add data filtering for better balance
+    if not is_testing:
+        person_examples = []
+        non_person_examples = []
+        
+        for example in data:
+            if any(tag in [LABELS["B-PERSON"], LABELS["I-PERSON"]] for tag in example["ner_tags"]):
+                person_examples.append(example)
+            else:
+                non_person_examples.append(example)
+        
+        # Keep all person examples, but sample from non-person examples
+        # Adjust ratio as needed: 2 means 2 non-person examples for each person example
+        ratio = 3  
+        non_person_count = min(len(person_examples) * ratio, len(non_person_examples))
+        
+        import random
+        sampled_non_person = random.sample(non_person_examples, non_person_count)
+        
+        print(f"Data filtering: Keeping {len(person_examples)} examples with person entities")
+        print(f"Data filtering: Sampling {non_person_count} from {len(non_person_examples)} examples without person entities")
+        
+        # Combine and shuffle
+        balanced_data = person_examples + sampled_non_person
+        random.shuffle(balanced_data)
+        data = balanced_data
+    
     # Create dataset from the data
     dataset = Dataset.from_list(data)
-    data = split_text_into_manageable_chunks(data)
+    
     # Create a DatasetDict with appropriate splits
     from datasets import DatasetDict
     

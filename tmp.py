@@ -4,10 +4,11 @@ from datasets import load_from_disk
 import os
 import multiprocessing
 import json
+import subprocess
+import sys
 
-def run_training():
+def run_training(data):
     ner = NER()
-    data = os.path.join(DATA_DIR, "raw")
     used_dir = os.path.join(DATA_DIR, "used")
     os.makedirs(used_dir, exist_ok=True)
     
@@ -46,6 +47,10 @@ def run_training():
             print(f"Error processing {file}: {str(e)}")
 
 if __name__ == '__main__':
-    # This is required for Windows to use multiprocessing
+
     multiprocessing.freeze_support()
-    run_training()
+    data = os.path.join(DATA_DIR, "raw", "general")
+    run_training(data=data)
+    data = os.path.join(DATA_DIR, "raw", "Social")
+    run_training(data=data)
+    

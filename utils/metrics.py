@@ -166,5 +166,28 @@ def extract_entities(token_labels):
     # Handle entity at the end of sequence
     if entity_start is not None:
         entities.append((entity_start, len(token_labels)-1, entity_type))
+    entities = fix_title_predictions(entities)
         
+    return entities
+
+def fix_title_predictions(entities, text):
+    import re
+    """Post-process to improve TITLE tag recognition"""
+    for i, entity in enumerate(entities):
+        # Rule 1: Fix common title abbreviations
+        if entity["entity"] == "O" and re.match(r'^[A-Z][a-z]{1,3}\.$', entity["word"]):
+            entity["entity"] = "TITLE"
+        from utils.config import TITLES    
+        # Rule 2: Check for common titles missed by the model
+        common_titles = TITLES
+        if entity["entity"] == "O" and entity["word"] in common_titles:
+            entity["entity"] = "TITLE"
+            
+        # Rule 3: Check context - title usually comes before a B-PERSON
+        if (i < len(entities)-1 and entities[i+1]["entity"] == "B-PERSON" 
+            and entity["entity"] == "O" and entity["word"].istitle()):
+            # Check if it looks like a title
+            if len(entity["word"]) <= 5 or entity["word"].endswith("."):
+                entity["entity"] = "TITLE"
+                
     return entities

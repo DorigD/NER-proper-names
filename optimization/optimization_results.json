@@ -1,0 +1,14 @@
+{
+  "best_params": {
+    "num_train_epochs": 8,
+    "per_device_train_batch_size": 8,
+    "weight_decay": 0.10839135120244724,
+    "learning_rate": 4.888348123929697e-05,
+    "person_weight": 3.0519232415708184,
+    "gamma": 2.2943216424234287
+  },
+  "best_f1_score": 0.8722064507988943,
+  "base_model": "c:\\Users\\Administrator\\Desktop\\tmp\\NER-proper-names\\models\\version-11-roberta-base",
+  "timestamp": "20250516-160812",
+  "n_trials": 16
+}
