@@ -1,14 +1,22 @@
 {
   "best_params": {
-    "num_train_epochs": 8,
-    "per_device_train_batch_size": 8,
-    "weight_decay": 0.10839135120244724,
-    "learning_rate": 4.888348123929697e-05,
-    "person_weight": 3.0519232415708184,
-    "gamma": 2.2943216424234287
+    "num_train_epochs": 5,
+    "per_device_train_batch_size": 4,
+    "weight_decay": 0.021792225826111452,
+    "learning_rate": 1.5149500175306783e-05,
+    "person_weight": 2.0089431012057846,
+    "gamma": 1.166939668058459,
+    "i_person_ratio": 0.5222954917571165,
+    "warmup_ratio": 0.005664813340985631,
+    "gradient_accumulation_steps": 2,
+    "adapter_type": "pfeiffer",
+    "adapter_size": 16,
+    "reduction_factor": 26,
+    "title_weight": 3.9867731592125932,
+    "person_scale": 1.0968636254989002
   },
-  "best_f1_score": 0.8722064507988943,
-  "base_model": "c:\\Users\\Administrator\\Desktop\\tmp\\NER-proper-names\\models\\version-11-roberta-base",
-  "timestamp": "20250516-160812",
+  "best_f1_score": 0.0,
+  "base_model": "roberta-base",
+  "timestamp": "20250519-095911",
   "n_trials": 16
 }

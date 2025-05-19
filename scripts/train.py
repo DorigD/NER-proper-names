@@ -5,13 +5,11 @@ from transformers import (
     TrainingArguments,
     AutoTokenizer,
     DataCollatorForTokenClassification,
-    EarlyStoppingCallback
+    EarlyStoppingCallback,
+    Trainer
 )
 import sys
-# Add adapter imports
-from adapters import AutoAdapterModel, AdapterConfig
-from transformers import Trainer
-from adapters import AdapterTrainer, AdapterConfig
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import torch
 from datasets import load_from_disk
 import gc
@@ -20,11 +18,9 @@ from utils.metrics import compute_metrics, compute_entity_level_metrics, extract
 from utils.config import LABELS, NUM_LABELS, MODEL_NAME, BEST_PARAMS_PATH, DATASET_PATH, MODEL_OUTPUT_DIR, PROJECT_DIR 
 from datetime import datetime
 from collections import Counter
-import torch.nn as nn
-from torchcrf import CRF
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from utils.models import AdapterWithCRF
-from torchcrf import CRF
+from utils.model import get_adapter_model_for_token_classification
+from adapters import AutoAdapterModel, AdapterConfig, AdapterTrainer
+
 
 def get_next_version_number(base_dir):
     """
@@ -72,7 +68,6 @@ def train_model(model_name=MODEL_NAME):
                 # Check if parameters are nested under "best_params" key
                 if "best_params" in loaded_data:
                     loaded_params = loaded_data["best_params"]
-                   
                 else:
                     loaded_params = loaded_data
                 
@@ -104,55 +99,44 @@ def train_model(model_name=MODEL_NAME):
     # Load tokenizer BEFORE model
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 
-    # Initialize model with CRF
-    use_crf = best_params.get("use_crf", True)  # Default to using CRF
+    # Create adapter configuration
+    adapter_type = best_params.get("adapter_type", "pfeiffer")
+    adapter_size = best_params.get("adapter_size", 32)
+    reduction_factor = best_params.get("reduction_factor", 16)
     
-    if use_crf:
-        print("Initializing model with CRF layer")
-        model = AdapterWithCRF(
-            model_name=model_name,
-            num_labels=NUM_LABELS,
-            adapter_name="ner_adapter",
-            adapter_size=best_params.get("adapter_size", 32),
-            reduction_factor=best_params.get("reduction_factor", 16)
-        )
-    else:
-        print("Initializing model with standard adapter")
-        # Proper adapter setup matching main.py
-        model = AutoAdapterModel.from_pretrained(model_name)
-        
-        # Add task adapter for NER with optimized parameters
-        adapter_name = "ner_adapter"
-        adapter_config = AdapterConfig(
-            mh_adapter=True,
-            output_adapter=True,
-            reduction_factor=best_params.get("reduction_factor", 16),
-            non_linearity="relu",
-            adapter_size=best_params.get("adapter_size", 32)
-        )
-        model.add_adapter(adapter_name, config=adapter_config)
-        
-        # Add classification head
-        model.add_classification_head(
-            adapter_name,
-            num_labels=NUM_LABELS,
-            id2label={str(i): label for i, label in LABELS.items()}
-        )
-        
-        # Activate adapter for training
-        model.train_adapter(adapter_name)
-    
+    try:
+        if adapter_type == "pfeiffer":
+            adapter_config = AdapterConfig.load("pfeiffer", 
+                                              reduction_factor=reduction_factor,
+                                              non_linearity="relu")
+        else:
+            adapter_config = AdapterConfig.load("houlsby",
+                                              reduction_factor=reduction_factor,
+                                              non_linearity="relu")
+        adapter_config.adapter_size = adapter_size
+    except:
+        # Fallback for older versions
+        adapter_config = AdapterConfig(reduction_factor=reduction_factor)
+
+    # Initialize model with standard adapter (no CRF)
+    print("Initializing model with standard adapter")
+    adapter_name = "ner_adapter"
+    model = get_adapter_model_for_token_classification(
+        model_name=model_name,
+        num_labels=NUM_LABELS,
+        adapter_name=adapter_name,
+        adapter_config=adapter_config
+    )
+     
     if torch.cuda.is_available():
         model = model.cuda()
 
     # Set class weights AFTER model is loaded
-  
     all_labels = []
     for item in tokenized_dataset["train"]:
         all_labels.extend([l for l in item["labels"] if l != -100])
 
     label_counts = Counter(all_labels)
-
 
     # Update to use person_weight from optimization if available
     person_weight = 5.0  # Default value
@@ -175,21 +159,18 @@ def train_model(model_name=MODEL_NAME):
 
     # Function to create training arguments
     def create_training_arguments(output_dir, training_params):
-        # Use CRF-specific learning rate if CRF is enabled
-        if training_params.get("use_crf", False) and "crf_learning_rate" in training_params:
-            lr = training_params["crf_learning_rate"]
-        else:
-            lr = training_params.get("learning_rate", 4e-5)
-            
         return TrainingArguments(
             output_dir=output_dir,
             num_train_epochs=training_params.get("num_train_epochs", 5),
             per_device_train_batch_size=training_params.get("per_device_train_batch_size", 16),
             weight_decay=training_params.get("weight_decay", 0.01),
-            learning_rate=lr,  # Now using the correct learning rate
+            learning_rate=training_params.get("learning_rate", 4e-5),
             gradient_accumulation_steps=training_params.get("gradient_accumulation_steps", 1),
             lr_scheduler_type=training_params.get("lr_scheduler_type", "linear"),
             warmup_ratio=training_params.get("warmup_ratio", 0.1),
+            eval_strategy="epoch",
+            save_strategy="epoch", 
+            load_best_model_at_end=True,
             metric_for_best_model="b_person_f1",
             greater_is_better=True
         )
@@ -201,16 +182,12 @@ def train_model(model_name=MODEL_NAME):
     # Get next version number
     next_version = get_next_version_number(models_base_dir)
     versioned_output_dir = os.path.join(models_base_dir, f"version-{next_version}-{MODEL_NAME}")
-    
- 
 
     # Create a single training run with the best available parameters
     training_args = create_training_arguments(
         output_dir=versioned_output_dir,
         training_params=best_params
     )
-
-    # Add before the trainer initialization
 
     # Create a custom trainer with focal loss
     class FocalLossTrainer(AdapterTrainer):
@@ -259,43 +236,11 @@ def train_model(model_name=MODEL_NAME):
             
             return (loss, outputs) if return_outputs else loss
 
-    # Optionally expose alpha and gamma in best_params for hyperparameter search
-    if "alpha" in best_params:
-        alpha = best_params["alpha"]
-        # adjust focal_loss by alpha if desired
-
     # Get person_scale from hyperparameter tuning
     person_scale = best_params.get("person_scale", 1.5)  # Default to 1.5 if not tuned
 
-    # Create a custom trainer for the CRF model
-    class CRFTrainer(AdapterTrainer):
-        def __init__(self, gamma=2.0, person_scale=1.5, *args, **kwargs):
-            self.gamma = gamma
-            self.person_scale = person_scale
-            super().__init__(*args, **kwargs)
-        
-        def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
-            # Extract inputs
-            labels = inputs.pop("labels")
-            
-            # For CRF model (removed the if/else since this trainer is only used with CRF)
-            outputs = model(
-                input_ids=inputs["input_ids"],
-                attention_mask=inputs["attention_mask"],
-                labels=labels
-            )
-            loss = outputs["loss"]
-            
-            # Apply class-specific weighting if needed
-            if self.training:
-                person_ratio = ((labels == LABELS["B-PERSON"]) | (labels == LABELS["I-PERSON"])).sum() / (labels != -100).sum()
-                if person_ratio > 0:
-                    loss = loss * (1 + (self.person_scale - 1) * person_ratio)
-            
-            return (loss, outputs) if return_outputs else loss
-
-    # Use CRFTrainer instead of FocalLossTrainer
-    trainer = CRFTrainer(
+    # Use focal loss trainer by default for better handling of class imbalance
+    trainer = FocalLossTrainer(
         gamma=gamma,
         person_scale=person_scale,
         model=model,
@@ -312,6 +257,7 @@ def train_model(model_name=MODEL_NAME):
     # Train the model
     print("Starting training...")
     trainer.train()
+    
     # Evaluate the model on validation set
     print("------Evaluating on validation set...------")
     eval_results = trainer.evaluate()
@@ -362,7 +308,6 @@ def train_model(model_name=MODEL_NAME):
     with open(TRAINING_RESULTS_PATH, "w") as f:
         json.dump(all_results, f, indent=2)
     
-
     # Before saving model
     # Clear cache to free up memory
     if torch.cuda.is_available():
@@ -370,16 +315,11 @@ def train_model(model_name=MODEL_NAME):
     gc.collect()  # Force garbage collection
 
     # Save the model to versioned directory
-    if use_crf:
-        # For CRF model, use custom save method
-        model.save(versioned_output_dir)
-    else:
-        # Your existing adapter save code
-        trainer.save_model(versioned_output_dir)
-        adapter_save_path = os.path.join(versioned_output_dir, "adapters")
-        os.makedirs(adapter_save_path, exist_ok=True)
-        model.save_adapter(adapter_save_path, adapter_name)
-        model.save_head(adapter_save_path, adapter_name)
+    trainer.save_model(versioned_output_dir)
+    adapter_save_path = os.path.join(versioned_output_dir, "adapters")
+    os.makedirs(adapter_save_path, exist_ok=True)
+    model.save_adapter(adapter_save_path, adapter_name)
+    model.save_head(adapter_save_path, adapter_name)
 
     # Save model configuration with label mappings
     model_config = {
@@ -389,7 +329,7 @@ def train_model(model_name=MODEL_NAME):
         "label2id": LABELS,
         "version": next_version,
         "adapter_name": adapter_name,
-        "use_crf": use_crf
+        "use_crf": False  # Always set to False since we're not using CRF
     }
 
     # Save with the expected filename for load_model compatibility
@@ -405,7 +345,6 @@ def train_model(model_name=MODEL_NAME):
             os.remove(MODEL_OUTPUT_DIR)
     
     shutil.copytree(versioned_output_dir, MODEL_OUTPUT_DIR)
-    
     
     # Create a version_info.json file at the standard location to track current version
     with open(os.path.join(models_base_dir, "version_info.json"), "w") as f:
@@ -441,35 +380,6 @@ def load_adapter_model(model_path):
     
     # Activate the adapter for inference
     model.set_active_adapters(adapter_name)
-    
-    return model, tokenizer
-
-# Add to train.py
-def load_crf_model(model_path):
-    """Load a model with CRF for inference"""
-    
-    # Load the model configuration
-    with open(os.path.join(model_path, "model_config.json"), "r") as f:
-        model_config = json.load(f)
-    
-    base_model = model_config.get("base_model", MODEL_NAME)
-    adapter_name = model_config.get("adapter_name", "ner_adapter")
-    use_crf = model_config.get("use_crf", False)
-    
-    # Load tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(model_path)
-    
-    if use_crf:
-        # Load CRF model
-        model = AdapterWithCRF(
-            model_name=base_model,
-            num_labels=NUM_LABELS,
-            adapter_name=adapter_name
-        )
-        model.load(model_path)
-    else:
-        # Load standard adapter model
-        model = load_adapter_model(model_path)
     
     return model, tokenizer
 

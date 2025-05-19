@@ -15,7 +15,14 @@ from scripts.converters.Converter import convert_file
 transformers.logging.set_verbosity_error() 
 import warnings
 warnings.filterwarnings("ignore")
-from utils.models import AdapterWithCRF
+from utils.model import get_adapter_model_for_token_classification
+# Unified import from adapters package
+from adapters import (
+    AutoAdapterModel, 
+    AdapterTrainer
+)
+from transformers import Trainer  # Add this import at the top
+import time
 class NER:
     def __init__(self):
         """
@@ -199,11 +206,8 @@ class NER:
         """
         import optuna
         from transformers import (
-            AutoModelForTokenClassification, 
-            Trainer, 
             TrainingArguments,
             DataCollatorForTokenClassification,
-            EvalPrediction,
             EarlyStoppingCallback
         )
         from datasets import load_from_disk
@@ -213,15 +217,12 @@ class NER:
         import json
         import tempfile
         from datetime import datetime
-        from utils.config import PROJECT_DIR, DATASET_PATH, BEST_PARAMS_PATH
+        from utils.config import PROJECT_DIR, DATASET_PATH, BEST_PARAMS_PATH, NUM_LABELS, LABELS  # Added NUM_LABELS
         from utils.metrics import compute_metrics
         from adapters import AutoAdapterModel, AdapterConfig
-        from transformers import AdapterTrainer
         # Ensure we have a tokenized dataset
         dataset_path = DATASET_PATH
-        if not os.path.exists(dataset_path):
-            from scripts.preprocess import preprocess
-            preprocess()
+        
             
         # Load tokenized dataset
         print("Loading tokenized dataset...")
@@ -239,239 +240,109 @@ class NER:
             
         # Define the optimization objective
         def objective(trial):
-            adapter_name = "ner_adapter"
-            num_train_epochs = trial.suggest_int("num_train_epochs", 3, 10)
-            per_device_train_batch_size = trial.suggest_categorical("per_device_train_batch_size", [8, 16, 32])
-            weight_decay = trial.suggest_float("weight_decay", 0.0, 0.3)
-            learning_rate = trial.suggest_float("learning_rate", 1e-6, 1e-4, log=True)
-            
-            # Add these parameters to trial
-            person_weight = trial.suggest_float("person_weight", 1.0, 7.0)  
-            gamma = trial.suggest_float("gamma", 0.5, 3.0)
-            i_person_ratio = trial.suggest_float("i_person_ratio", 0.4, 0.8)
-            warmup_ratio = trial.suggest_float("warmup_ratio", 0.0, 0.2)
-            gradient_accumulation_steps = trial.suggest_int("gradient_accumulation_steps", 1, 4)
-            
-            # Add adapter-specific hyperparameters
-            adapter_size = trial.suggest_categorical("adapter_size", [16, 32, 64])
-            reduction_factor = trial.suggest_int("reduction_factor", 8, 32)
-            adapter_type = trial.suggest_categorical("adapter_type", ["pfeiffer", "houlsby"])
-            
-            # Add to objective function in main.py
-            title_weight = trial.suggest_float("title_weight", 0.8, 2.5)
+            # Create a temporary directory for this trial
+            trial_id = trial.number
+            with tempfile.TemporaryDirectory(prefix=f"trial_{trial_id}_") as tmp_dir:
+                # Hyperparameters to optimize
+                num_train_epochs = trial.suggest_int("num_train_epochs", 2, 5)
+                
+                # IMPORTANT: Use a much smaller batch size to avoid dimension mismatches
+                batch_size = trial.suggest_categorical("per_device_train_batch_size", [4, 8]) 
+                
+                # Rest of your hyperparameter settings
+                weight_decay = trial.suggest_float("weight_decay", 0.01, 0.1, log=True)
+                learning_rate = trial.suggest_float("learning_rate", 1e-5, 1e-4, log=True)
+                person_weight = trial.suggest_float("person_weight", 1.0, 5.0)
+                gamma = trial.suggest_float("gamma", 1.0, 3.0)
+                i_person_ratio = trial.suggest_float("i_person_ratio", 0.5, 1.0)
+                warmup_ratio = trial.suggest_float("warmup_ratio", 0.0, 0.2)
+                gradient_accumulation_steps = trial.suggest_int("gradient_accumulation_steps", 1, 4)
+                
+                # Create adapter config
+                adapter_type = trial.suggest_categorical("adapter_type", ["pfeiffer", "houlsby"])
+                adapter_size = trial.suggest_categorical("adapter_size", [16, 32, 64])
+                reduction_factor = trial.suggest_int("reduction_factor", 8, 32)
+                
+                # Add title weight optimization
+                title_weight = trial.suggest_float("title_weight", 1.0, 5.0)
+                
+                # Add person_scale parameter
+                person_scale = trial.suggest_float("person_scale", 1.0, 2.0)
 
-            # Add this with your other trial.suggest parameters
-            person_scale = trial.suggest_float("person_scale", 1.0, 3.0)
-
-            # Add CRF-specific hyperparameters
-            use_crf = trial.suggest_categorical("use_crf", [True, False])
-            crf_learning_rate = trial.suggest_float("crf_learning_rate", 5e-6, 2e-4, log=True) if use_crf else None
-
-            # Use a temporary directory for this trial that will be cleaned up automatically
-            with tempfile.TemporaryDirectory() as trial_dir:
-                print(f"Trial {trial.number} using temporary directory: {trial_dir}")
+                # Add a debug step to check the dataset structure
+                print(f"Dataset structure check: {tokenized_dataset['train'][0].keys()}")
+                print(f"First example shape: input_ids={len(tokenized_dataset['train'][0]['input_ids'])}, " 
+                      f"labels={len(tokenized_dataset['train'][0]['labels'])}")
                 
-                # Get the number of labels from the config
-                from utils.config import ID2LABEL, LABELS
-                num_labels = len(ID2LABEL)
+                # Create adapter configuration
+                try:
+                    if adapter_type == "pfeiffer":
+                        adapter_config = AdapterConfig.load("pfeiffer", 
+                                                          reduction_factor=reduction_factor,
+                                                          non_linearity="relu")
+                    else:
+                        adapter_config = AdapterConfig.load("houlsby",
+                                                          reduction_factor=reduction_factor,
+                                                          non_linearity="relu")
+                    adapter_config.adapter_size = adapter_size
+                except:
+                    # Fallback for older versions
+                    adapter_config = AdapterConfig(reduction_factor=reduction_factor)
                 
-                if use_crf:
-                    print(f"Trial {trial.number}: Using CRF model")
-                    # Create CRF model for this trial
-                    model = AdapterWithCRF(
-                        model_name=self.base_model,
-                        num_labels=num_labels,
-                        adapter_name=adapter_name,
-                        adapter_size=adapter_size,
-                        reduction_factor=reduction_factor
-                    )
-                else:
-                    print(f"Trial {trial.number}: Using standard adapter model")
-                    # Prepare model with adapters (existing code)
-                    model = AutoAdapterModel.from_pretrained(self.base_model)
-                    # Add task adapter for NER
-                    adapter_config = AdapterConfig(
-                        mh_adapter=True,
-                        output_adapter=True,
-                        reduction_factor=reduction_factor,
-                        non_linearity="relu",
-                        adapter_size=adapter_size
-                    )
-                    model.add_adapter(adapter_name, config=adapter_config)
-                    # Add classification head
-                    model.add_classification_head(
-                        adapter_name,
-                        num_labels=num_labels,
-                        id2label={str(i): label for i, label in enumerate(LABELS)}
-                    )
-                    # Activate adapter for training
-                    model.train_adapter(adapter_name)
+                adapter_name = "ner_adapter"
                 
-                # Apply class weights during training
-                class_weights = torch.ones(num_labels)
-                class_weights[0] = 0.2  # Reduce weight for "O" tag
-                class_weights[1] = person_weight  # Use the optimized person weight
-                class_weights[2] = person_weight * i_person_ratio  # I-PERSON slightly lower
-                if "TITLE" in LABELS:
-                    title_idx = list(LABELS.keys()).index("TITLE")
-                    class_weights[title_idx] = title_weight
+                # Use a standard adapter model - no custom CRF implementation
+                model = get_adapter_model_for_token_classification(
+                    model_name=self.base_model,
+                    num_labels=NUM_LABELS,
+                    adapter_name=adapter_name,
+                    adapter_config=adapter_config
+                )
                 
-                model.config.class_weights = class_weights.tolist()
+                # Create training arguments with the hyperparameters
+                training_args = TrainingArguments(
+                    output_dir=tmp_dir,  # Use the unique directory
+                    num_train_epochs=num_train_epochs,
+                    per_device_train_batch_size=batch_size,
+                    weight_decay=weight_decay,
+                    learning_rate=learning_rate,
+                    gradient_accumulation_steps=gradient_accumulation_steps,
+                    warmup_ratio=warmup_ratio,
+                    evaluation_strategy="epoch",
+                    save_strategy="epoch",
+                    load_best_model_at_end=True,
+                    metric_for_best_model="b_person_f1",
+                    greater_is_better=True,
+                    save_total_limit=1,
+                    report_to=["none"], 
+                )
                 
-                # Data collator for NER
-                data_collator = DataCollatorForTokenClassification(tokenizer=self.tokenizer)
+                # Create data collator
+                data_collator = DataCollatorForTokenClassification(
+                    self.tokenizer,
+                    pad_to_multiple_of=8 if torch.cuda.is_available() else None
+                )
                 
-                # Define training arguments with minimal disk usage
-                if use_crf:
-                    training_args = TrainingArguments(
-                        output_dir=trial_dir,
-                        num_train_epochs=num_train_epochs,
-                        per_device_train_batch_size=per_device_train_batch_size,
-                        weight_decay=weight_decay,
-                        learning_rate=crf_learning_rate,
-                        eval_strategy="epoch",
-                        save_strategy="no", 
-                        logging_strategy="no",
-                        load_best_model_at_end=True, 
-                        metric_for_best_model="b_person_f1",
-                        greater_is_better=True,
-                        max_grad_norm=1.0,
-                        per_device_eval_batch_size=8,
-                        report_to="none",
-                    )
-                else:
-                    training_args = TrainingArguments(
-                        output_dir=trial_dir,
-                        num_train_epochs=num_train_epochs,
-                        per_device_train_batch_size=per_device_train_batch_size,
-                        weight_decay=weight_decay,
-                        learning_rate=learning_rate,
-                        eval_strategy="epoch",
-                        save_strategy="no", 
-                        logging_strategy="no",
-                        load_best_model_at_end=True, 
-                        metric_for_best_model="b_person_f1",
-                        greater_is_better=True,
-                        max_grad_norm=1.0,
-                        per_device_eval_batch_size=8,
-                        report_to="none",
-                    )
+                # Use the standard AdapterTrainer
+                trainer = AdapterTrainer(
+                    model=model,
+                    args=training_args,
+                    train_dataset=tokenized_dataset["train"],
+                    eval_dataset=tokenized_dataset["validation"],
+                    tokenizer=self.tokenizer,
+                    data_collator=data_collator,
+                    compute_metrics=compute_metrics
+                )
                 
-                # Create a custom trainer with focal loss
-                class FocalLossTrainer(AdapterTrainer):  # Use AdapterTrainer, not Trainer
-                    def __init__(self, gamma, person_scale, *args, **kwargs):
-                        super().__init__(*args, **kwargs)
-                        self.gamma = gamma
-                        self.person_scale = person_scale
-
-                    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
-                        labels = inputs.pop("labels")
-                        outputs = model(**inputs, adapter_names=[adapter_name])
-                        logits = outputs.logits
-                        
-                        # Get the mask for valid positions (ignore padding tokens)
-                        active_loss = labels.view(-1) != -100
-                        active_logits = logits.view(-1, num_labels)
-                        active_labels = torch.where(
-                            active_loss, 
-                            labels.view(-1), 
-                            torch.tensor(0).type_as(labels)
-                        )
-                        
-                        # Apply softmax to get probabilities
-                        probs = torch.nn.functional.softmax(active_logits, dim=-1)
-                        
-                        # Get probabilities for the true class
-                        pt = probs.gather(1, active_labels.unsqueeze(1)).squeeze()
-                        
-                        # Apply class weights
-                        weights = class_weights.to(model.device)
-                        alpha = weights.gather(0, active_labels)
-                        
-                        # Calculate focal loss: -α * (1-pt)^γ * log(pt)
-                        focal_weight = (1 - pt).pow(self.gamma)
-                        focal_loss = -alpha * focal_weight * torch.log(pt + 1e-10)
-                        
-                        # FIRST apply person scale before calculating final loss!
-                        person_indices = (active_labels == LABELS["B-PERSON"]) | (active_labels == LABELS["I-PERSON"])
-                        if person_indices.any():
-                            focal_loss[person_indices] *= self.person_scale
-                        
-                        # THEN apply mask and compute mean
-                        loss = torch.zeros_like(labels.view(-1), dtype=torch.float)
-                        loss[active_loss] = focal_loss[active_loss]
-                        loss = loss.sum() / active_loss.sum()
-                        
-                        return (loss, outputs) if return_outputs else loss
-                
-                # After creating the model:
-
-                # Create appropriate trainer based on model type
-                if use_crf:
-                    class CRFTrainer(AdapterTrainer):
-                        def __init__(self, gamma=2.0, person_scale=1.5, *args, **kwargs):
-                            self.gamma = gamma
-                            self.person_scale = person_scale
-                            super().__init__(*args, **kwargs)
-                        
-                        def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
-                            labels = inputs.pop("labels")
-                            
-                            # For CRF model
-                            outputs = model(
-                                input_ids=inputs["input_ids"],
-                                attention_mask=inputs["attention_mask"],
-                                labels=labels
-                            )
-                            loss = outputs["loss"]
-                            
-                            # Apply class-specific weighting if needed
-                            if self.training:
-                                # Apply weighting to CRF loss - simplified as we can't easily get token-wise losses
-                                person_ratio = ((labels == LABELS["B-PERSON"]) | (labels == LABELS["I-PERSON"])).sum() / (labels != -100).sum()
-                                if person_ratio > 0:
-                                    loss = loss * (1 + (self.person_scale - 1) * person_ratio)
-                            
-                            return (loss, outputs) if return_outputs else loss
-                    
-                    trainer = CRFTrainer(
-                        gamma=gamma,
-                        person_scale=person_scale,
-                        model=model,
-                        args=training_args,
-                        train_dataset=tokenized_dataset["train"],
-                        eval_dataset=tokenized_dataset["validation"],
-                        tokenizer=self.tokenizer,
-                        data_collator=data_collator,
-                        compute_metrics=compute_metrics
-                    )
-                else:
-                    # Use existing FocalLossTrainer for non-CRF models
-                    trainer = FocalLossTrainer(
-                        gamma=gamma,
-                        person_scale=person_scale,
-                        model=model,
-                        args=training_args,
-                        train_dataset=tokenized_dataset["train"],
-                        eval_dataset=tokenized_dataset["validation"],
-                        tokenizer=self.tokenizer,
-                        data_collator=data_collator,
-                        compute_metrics=compute_metrics
-                    )
-                
-                trainer.add_callback(EarlyStoppingCallback(early_stopping_patience=3))
-                
-                # Train the model
-                trainer.train()
-                
-                # Evaluate the model
-                eval_results = trainer.evaluate()
-                
-                # Clean up GPU memory after each trial
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-                    
-                return eval_results["b_person_f1"]
+                # Add error handling around training
+                try:
+                    trainer.train()
+                    eval_results = trainer.evaluate()
+                    return eval_results["b_person_f1"]
+                except Exception as e:
+                    print(f"Trial {trial_id} failed with error: {e}")
+                    # Return a poor score to indicate failure
+                    return 0.0
         
         # Check for existing study to continue
         storage_name = f"sqlite:///{os.path.join(results_dir, 'optuna.db')}"
@@ -914,3 +785,4 @@ class NER:
         for i, (tokens, pos, true_label, pred_label) in enumerate(error_examples[:5]):
             context = " ".join(tokens[max(0, pos-3):min(len(tokens), pos+4)])
             print(f"Error {i+1}: '{context}' - True: {true_label}, Pred: {pred_label}")
+
