@@ -15,14 +15,6 @@ from scripts.converters.Converter import convert_file
 transformers.logging.set_verbosity_error() 
 import warnings
 warnings.filterwarnings("ignore")
-from utils.model import get_adapter_model_for_token_classification
-# Unified import from adapters package
-from adapters import (
-    AutoAdapterModel, 
-    AdapterTrainer
-)
-from transformers import Trainer  # Add this import at the top
-import time
 class NER:
     def __init__(self):
         """
@@ -251,10 +243,12 @@ class NER:
         from datetime import datetime
         from utils.config import PROJECT_DIR, DATASET_PATH, BEST_PARAMS_PATH, LABELS, NUM_LABELS
         from utils.metrics import compute_metrics
-        from adapters import AutoAdapterModel, AdapterConfig
+        
         # Ensure we have a tokenized dataset
         dataset_path = DATASET_PATH
-        
+        if not os.path.exists(dataset_path):
+            from scripts.preprocess import preprocess
+            preprocess()
             
         # Load tokenized dataset
         print("Loading tokenized dataset...")
@@ -359,28 +353,22 @@ class NER:
                 # Data collator for NER
                 data_collator = DataCollatorForTokenClassification(tokenizer=self.tokenizer)
                 
-                # Create training arguments with the hyperparameters
+                # Define training arguments with minimal disk usage
                 training_args = TrainingArguments(
-                    output_dir=tmp_dir,  # Use the unique directory
+                    output_dir=trial_dir,
                     num_train_epochs=num_train_epochs,
-                    per_device_train_batch_size=batch_size,
+                    per_device_train_batch_size=per_device_train_batch_size,
                     weight_decay=weight_decay,
                     learning_rate=learning_rate,
-                    gradient_accumulation_steps=gradient_accumulation_steps,
-                    warmup_ratio=warmup_ratio,
-                    evaluation_strategy="epoch",
-                    save_strategy="epoch",
-                    load_best_model_at_end=True,
-                    metric_for_best_model="b_person_f1",
+                    eval_strategy="epoch",
+                    save_strategy="no", 
+                    logging_strategy="no",
+                    load_best_model_at_end=False, 
+                    metric_for_best_model="weighted_f1",
                     greater_is_better=True,
-                    save_total_limit=1,
-                    report_to=["none"], 
-                )
-                
-                # Create data collator
-                data_collator = DataCollatorForTokenClassification(
-                    self.tokenizer,
-                    pad_to_multiple_of=8 if torch.cuda.is_available() else None
+                    max_grad_norm=1.0,
+                    per_device_eval_batch_size=8,
+                    report_to="none",
                 )
                 
                 # Initialize custom trainer with focal loss
@@ -412,13 +400,8 @@ class NER:
         # Create and run Optuna study
         print(f"Starting hyperparameter optimization with {n_trials} trials using adapters...")
         study = optuna.create_study(
-            study_name=study_name,
-            storage=storage_name,
-            load_if_exists=False,  # Always create new study
             direction="maximize",
-            pruner=optuna.pruners.HyperbandPruner(
-                min_resource=1, max_resource=10, reduction_factor=3
-            )
+            pruner=optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=0)
         )
         
         try:
@@ -534,7 +517,6 @@ class NER:
         if current_entity:
             entities.append(current_entity)
         
-        
         return entities
 
     def predict_batch(self, texts):
@@ -611,9 +593,6 @@ class NER:
             # Add the last entity if there is one
             if current_entity:
                 entities.append(current_entity)
-            
-            # Apply advanced post-processing to fix common name boundary issues
-           
             
             batch_results.append(entities)
         
@@ -805,37 +784,3 @@ class NER:
             print(f"Error during evaluation with Trainer: {e}")
             print("Falling back to manual evaluation method...")
             return
-
-    # Add this function to better understand your model's errors
-    def analyze_predictions(trainer, dataset, tokenizer, id2label):
-        print("Analyzing prediction errors...")
-        predictions = trainer.predict(dataset)
-        pred_labels = np.argmax(predictions.predictions, axis=-1)
-        true_labels = predictions.label_ids
-        
-        error_types = {"false_negative": 0, "false_positive": 0, "boundary_error": 0}
-        error_examples = []
-        
-        for i in range(len(dataset)):
-            tokens = dataset[i]["tokens"]
-            pred = pred_labels[i]
-            true = true_labels[i]
-            
-            for j in range(len(true)):
-                if true[j] == -100:
-                    continue
-                    
-                if true[j] in [1, 2] and pred[j] == 0:  # Missing person
-                    error_types["false_negative"] += 1
-                    error_examples.append((tokens, j, id2label[str(true[j])], id2label[str(pred[j])]))
-                elif true[j] == 0 and pred[j] in [1, 2]:  # False person
-                    error_types["false_positive"] += 1
-                elif (true[j] == 1 and pred[j] == 2) or (true[j] == 2 and pred[j] == 1):
-                    error_types["boundary_error"] += 1
-        
-        print(f"Error analysis: {error_types}")
-        print("\nExample errors:")
-        for i, (tokens, pos, true_label, pred_label) in enumerate(error_examples[:5]):
-            context = " ".join(tokens[max(0, pos-3):min(len(tokens), pos+4)])
-            print(f"Error {i+1}: '{context}' - True: {true_label}, Pred: {pred_label}")
-
