@@ -2,14 +2,13 @@ import os
 import json
 import numpy as np
 from transformers import (
+    AutoModelForTokenClassification,
     TrainingArguments,
+    Trainer,
     AutoTokenizer,
     DataCollatorForTokenClassification,
-    EarlyStoppingCallback,
-    Trainer
+
 )
-import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import torch
 from datasets import load_from_disk
 import gc
@@ -69,6 +68,7 @@ def train_model(model_name=MODEL_NAME):
                 # Check if parameters are nested under "best_params" key
                 if "best_params" in loaded_data:
                     loaded_params = loaded_data["best_params"]
+                   
                 else:
                     loaded_params = loaded_data
                 
@@ -86,13 +86,6 @@ def train_model(model_name=MODEL_NAME):
         if key not in best_params:
             print(f"Warning: Missing required parameter '{key}', using default value: {default_params[key]}")
             best_params[key] = default_params[key]
-    
-    # Add to your hyperparameters section:
-    gamma = 2.0  # Standard recommendation for imbalanced problems
-    if "gamma" in best_params:
-        gamma = best_params["gamma"]
-    
-    use_class_weights = best_params.get("use_class_weights", False)
     
     # THEN load dataset and model
     tokenized_dataset = load_from_disk(DATASET_PATH)
@@ -129,33 +122,36 @@ def train_model(model_name=MODEL_NAME):
         model = model.cuda()
 
     # Set class weights AFTER model is loaded
+  
     all_labels = []
     for item in tokenized_dataset["train"]:
         all_labels.extend([l for l in item["labels"] if l != -100])
 
     label_counts = Counter(all_labels)
 
+
     # Update to use person_weight from optimization if available
     person_weight = 5.0  # Default value
     if "person_weight" in best_params:
         person_weight = best_params["person_weight"]
   
-    class_weights = torch.ones(NUM_LABELS)
-    class_weights[0] = 0.2
-    class_weights[1] = person_weight
-    class_weights[2] = person_weight * best_params.get("i_person_ratio", 0.9)
-    # Replace direct index access with this safer approach
-    if "TITLE" in LABELS:
-        title_idx = list(LABELS.values()).index(LABELS["TITLE"])
-        class_weights[title_idx] = best_params.get("title_weight", 1.2)
 
+    # Set up class weights - emphasize PERSON tags (both B and I)
+    class_weights = torch.ones(NUM_LABELS)
+    class_weights[0] = 0.3  # Reduce weight for "O" tag
+    class_weights[1] = person_weight  # Use optimized weight for B-PERSON
+    class_weights[2] = person_weight * 0.6  # I-PERSON proportional to B-PERSON
+    if "TITLE" in LABELS:
+        class_weights[3] = 1.5  # Small increase for TITLE
+
+    # Apply class weights to the model's loss function
     model.config.class_weights = class_weights.tolist()
 
     # Prepare data collator
     data_collator = DataCollatorForTokenClassification(tokenizer=tokenizer)
 
     # Function to create training arguments
-    def create_training_arguments(output_dir, training_params):
+    def create_training_arguments(output_dir, num_train_epochs, per_device_train_batch_size, weight_decay):
         return TrainingArguments(
             output_dir=output_dir,
             num_train_epochs=num_train_epochs,
@@ -186,6 +182,8 @@ def train_model(model_name=MODEL_NAME):
     # Get next version number
     next_version = get_next_version_number(models_base_dir)
     versioned_output_dir = os.path.join(models_base_dir, f"version-{next_version}-{MODEL_NAME}")
+    
+ 
 
     # Create a single training run with the best available parameters
     training_args = create_training_arguments(
@@ -201,8 +199,7 @@ def train_model(model_name=MODEL_NAME):
     class FocalLossTrainer(Trainer):
         def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
             labels = inputs.pop("labels")
-            # Add adapter_names parameter to match main.py
-            outputs = model(**inputs, adapter_names=["ner_adapter"])
+            outputs = model(**inputs)
             logits = outputs.logits
             
             # Parameters for focal loss
@@ -253,18 +250,18 @@ def train_model(model_name=MODEL_NAME):
         callbacks=[early_stopping]  # Add early stopping callback
     )
 
-    trainer.add_callback(EarlyStoppingCallback(early_stopping_patience=3))
-
     # Train the model
     print("Starting training...")
     trainer.train()
-    
     # Evaluate the model on validation set
     print("------Evaluating on validation set...------")
     eval_results = trainer.evaluate()
-
+    # Also evaluate on test set for final assessment
     test_results = trainer.evaluate(tokenized_dataset["test"])
     
+
+    # AFTER obtaining results, NOW create the current_result dictionary
+    # Define the path for saving training results
     TRAINING_RESULTS_PATH = os.path.join(PROJECT_DIR, "logs", "training_results.json")
 
     # Create the current training result - MOVED HERE after eval_results and test_results exist
@@ -277,14 +274,6 @@ def train_model(model_name=MODEL_NAME):
         "validation": eval_results,
         "test": test_results  
     }
-
-    # Add to train.py evaluation section
-    title_results = {
-        "title_f1": test_results.get("eval_title_f1", 0.0),
-        "title_precision": test_results.get("eval_title_precision", 0.0),
-        "title_recall": test_results.get("eval_title_recall", 0.0)
-    }
-    current_result["title_metrics"] = title_results
 
     # Ensure directory exists
     os.makedirs(os.path.dirname(TRAINING_RESULTS_PATH), exist_ok=True)
@@ -309,6 +298,7 @@ def train_model(model_name=MODEL_NAME):
     with open(TRAINING_RESULTS_PATH, "w") as f:
         json.dump(all_results, f, indent=2)
     
+
     # Before saving model
     # Clear cache to free up memory
     if torch.cuda.is_available():
@@ -350,6 +340,7 @@ def train_model(model_name=MODEL_NAME):
     
     shutil.copytree(versioned_output_dir, MODEL_OUTPUT_DIR)
     
+    
     # Create a version_info.json file at the standard location to track current version
     with open(os.path.join(models_base_dir, "version_info.json"), "w") as f:
         json.dump({
@@ -360,30 +351,4 @@ def train_model(model_name=MODEL_NAME):
     
     print("Training completed successfully!")
     return versioned_output_dir
-
-def load_adapter_model(model_path):
-    """Load a model with adapters for inference"""
-    
-    # Load the model configuration
-    with open(os.path.join(model_path, "model_config.json"), "r") as f:
-        model_config = json.load(f)
-    
-    base_model = model_config.get("base_model", MODEL_NAME)
-    adapter_name = model_config.get("adapter_name", "ner_adapter")
-    
-    # Load tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(model_path)
-    
-    # Load base model
-    model = AutoAdapterModel.from_pretrained(base_model)
-    
-    # Load adapter from saved path
-    adapter_path = os.path.join(model_path, "adapters")
-    model.load_adapter(adapter_path)
-    model.load_head(adapter_path)
-    
-    # Activate the adapter for inference
-    model.set_active_adapters(adapter_name)
-    
-    return model, tokenizer
 
