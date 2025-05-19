@@ -18,9 +18,10 @@ from utils.metrics import compute_metrics, compute_entity_level_metrics, extract
 from utils.config import LABELS, NUM_LABELS, MODEL_NAME, BEST_PARAMS_PATH, DATASET_PATH, MODEL_OUTPUT_DIR, PROJECT_DIR 
 from datetime import datetime
 from collections import Counter
-from utils.model import get_adapter_model_for_token_classification
-from adapters import AutoAdapterModel, AdapterConfig, AdapterTrainer
-
+import torch.nn as nn
+from adapters import AdapterConfig, AutoAdapterModel
+from adapters.composition import Stack
+from transformers import EarlyStoppingCallback
 
 def get_next_version_number(base_dir):
     """
@@ -99,35 +100,31 @@ def train_model(model_name=MODEL_NAME):
     # Load tokenizer BEFORE model
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 
-    # Create adapter configuration
-    adapter_type = best_params.get("adapter_type", "pfeiffer")
-    adapter_size = best_params.get("adapter_size", 32)
-    reduction_factor = best_params.get("reduction_factor", 16)
-    
-    try:
-        if adapter_type == "pfeiffer":
-            adapter_config = AdapterConfig.load("pfeiffer", 
-                                              reduction_factor=reduction_factor,
-                                              non_linearity="relu")
-        else:
-            adapter_config = AdapterConfig.load("houlsby",
-                                              reduction_factor=reduction_factor,
-                                              non_linearity="relu")
-        adapter_config.adapter_size = adapter_size
-    except:
-        # Fallback for older versions
-        adapter_config = AdapterConfig(reduction_factor=reduction_factor)
 
-    # Initialize model with standard adapter (no CRF)
-    print("Initializing model with standard adapter")
-    adapter_name = "ner_adapter"
-    model = get_adapter_model_for_token_classification(
-        model_name=model_name,
-        num_labels=NUM_LABELS,
-        adapter_name=adapter_name,
-        adapter_config=adapter_config
+    # Use AutoAdapterModel instead of AutoModelForTokenClassification
+    model = AutoAdapterModel.from_pretrained(model_name)
+    
+    # Add NER adapter
+    # NER is a sequence tagging task, so we use a sequence classification adapter
+    adapter_config = AdapterConfig.load(
+        "pfeiffer",  # Efficient adapter architecture
+        reduction_factor=16  # Controls adapter size (smaller=faster but less expressive)
     )
-     
+    model.add_adapter("ner_adapter", config=adapter_config)
+    
+    # Add NER classification head
+    model.add_classification_head(
+        "ner_adapter",
+        num_labels=NUM_LABELS,
+        id2label={str(i): label for label, i in LABELS.items()}
+    )
+    
+    # Activate the adapter
+    model.train_adapter("ner_adapter")
+    
+    # Freeze base model parameters
+    model.freeze_model(True)
+    
     if torch.cuda.is_available():
         model = model.cuda()
 
@@ -161,18 +158,25 @@ def train_model(model_name=MODEL_NAME):
     def create_training_arguments(output_dir, training_params):
         return TrainingArguments(
             output_dir=output_dir,
-            num_train_epochs=training_params.get("num_train_epochs", 5),
-            per_device_train_batch_size=training_params.get("per_device_train_batch_size", 16),
-            weight_decay=training_params.get("weight_decay", 0.01),
-            learning_rate=training_params.get("learning_rate", 4e-5),
-            gradient_accumulation_steps=training_params.get("gradient_accumulation_steps", 1),
-            lr_scheduler_type=training_params.get("lr_scheduler_type", "linear"),
-            warmup_ratio=training_params.get("warmup_ratio", 0.1),
-            eval_strategy="epoch",
-            save_strategy="epoch", 
+            num_train_epochs=num_train_epochs,
+            per_device_train_batch_size=per_device_train_batch_size,
+            per_device_eval_batch_size=16,
+            warmup_steps=500,
+            weight_decay=weight_decay,
+            logging_strategy="steps",
+            logging_steps=50,
+            eval_strategy="epoch", 
+            save_strategy="epoch",
             load_best_model_at_end=True,
-            metric_for_best_model="b_person_f1",
-            greater_is_better=True
+            metric_for_best_model="person_entity_f1",
+            greater_is_better=True,
+            no_cuda=False,
+            fp16=torch.cuda.is_available(), 
+            dataloader_num_workers=4,
+            learning_rate=5e-4,  # Higher learning rate for adapters
+            lr_scheduler_type="cosine_with_restarts",  # Better scheduler
+            warmup_ratio=0.1,
+            save_total_limit=2,  # Keep only best 2 checkpoints
         )
 
     # Create models base directory if it doesn't exist
@@ -186,63 +190,59 @@ def train_model(model_name=MODEL_NAME):
     # Create a single training run with the best available parameters
     training_args = create_training_arguments(
         output_dir=versioned_output_dir,
-        training_params=best_params
+        num_train_epochs=best_params["num_train_epochs"],
+        per_device_train_batch_size=best_params["per_device_train_batch_size"],
+        weight_decay=best_params["weight_decay"],
     )
 
-    # Create a custom trainer with focal loss
-    class FocalLossTrainer(AdapterTrainer):
-        def __init__(self, gamma, person_scale=1.5, *args, **kwargs):
-            self.gamma = gamma
-            self.person_scale = person_scale  # Store as instance variable
-            super().__init__(*args, **kwargs)
-            
+    # Add before the trainer initialization
+
+    # Create a focal loss trainer for better handling of imbalanced classes
+    class FocalLossTrainer(Trainer):
         def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
             labels = inputs.pop("labels")
             # Add adapter_names parameter to match main.py
             outputs = model(**inputs, adapter_names=["ner_adapter"])
             logits = outputs.logits
             
-            # Get the mask for valid positions (ignore padding tokens)
+            # Parameters for focal loss
+            gamma = 2.0  # Focusing parameter
+            alpha = class_weights.to(model.device)
+            
+            # Compute probabilities
+            probs = torch.softmax(logits.view(-1, NUM_LABELS), dim=-1)
+            
+            # Create one-hot encoding of labels
             active_loss = labels.view(-1) != -100
-            active_logits = logits.view(-1, NUM_LABELS)
-            active_labels = torch.where(
-                active_loss, 
-                labels.view(-1), 
-                torch.tensor(0).type_as(labels)
-            )
+            active_labels = torch.where(active_loss, labels.view(-1), torch.tensor(0).type_as(labels))
             
-            # Apply softmax to get probabilities
-            probs = torch.nn.functional.softmax(active_logits, dim=-1)
+            one_hot = torch.zeros_like(probs).scatter_(1, active_labels.unsqueeze(1), 1)
             
-            # Get probabilities for the true class
-            pt = probs.gather(1, active_labels.unsqueeze(1)).squeeze()
+            # Compute focal weights
+            pt = (one_hot * probs).sum(1) + 1e-10
+            focal_weight = (1 - pt) ** gamma
             
-            if use_class_weights:
-                alpha = class_weights.to(model.device).gather(0, active_labels)
-                focal_loss = -alpha * (1 - pt).pow(self.gamma) * torch.log(pt + 1e-10)
-            else:
-                focal_loss = -(1 - pt).pow(self.gamma) * torch.log(pt + 1e-10)
+            # Get class weights for each sample
+            alpha_weight = torch.gather(alpha, 0, active_labels)
             
-            # Added: Apply higher gradient weight to errors on person tokens
-            if self.training:
-                person_indices = (active_labels == LABELS["B-PERSON"]) | (active_labels == LABELS["I-PERSON"])
-                if person_indices.any():
-                    focal_loss[person_indices] *= self.person_scale
+            # Compute focal loss
+            loss = -alpha_weight * focal_weight * torch.log(pt)
             
-            # Apply mask and compute mean
-            loss = torch.zeros_like(labels.view(-1), dtype=torch.float)
-            loss[active_loss] = focal_loss[active_loss]
-            loss = loss.sum() / active_loss.sum()
+            # Apply mask for padding
+            loss = torch.where(active_loss, loss, torch.tensor(0.0).type_as(loss))
+            
+            loss = loss.mean()
             
             return (loss, outputs) if return_outputs else loss
 
-    # Get person_scale from hyperparameter tuning
-    person_scale = best_params.get("person_scale", 1.5)  # Default to 1.5 if not tuned
+    # Setup early stopping callback
+    early_stopping = EarlyStoppingCallback(
+        early_stopping_patience=3,
+        early_stopping_threshold=0.001
+    )
 
-    # Use focal loss trainer by default for better handling of class imbalance
+    # Use FocalLossTrainer with early stopping
     trainer = FocalLossTrainer(
-        gamma=gamma,
-        person_scale=person_scale,
         model=model,
         args=training_args,
         train_dataset=tokenized_dataset["train"],
@@ -250,6 +250,7 @@ def train_model(model_name=MODEL_NAME):
         tokenizer=tokenizer,
         data_collator=data_collator,
         compute_metrics=compute_metrics,
+        callbacks=[early_stopping]  # Add early stopping callback
     )
 
     trainer.add_callback(EarlyStoppingCallback(early_stopping_patience=3))
@@ -316,11 +317,15 @@ def train_model(model_name=MODEL_NAME):
 
     # Save the model to versioned directory
     trainer.save_model(versioned_output_dir)
-    adapter_save_path = os.path.join(versioned_output_dir, "adapters")
-    os.makedirs(adapter_save_path, exist_ok=True)
-    model.save_adapter(adapter_save_path, adapter_name)
-    model.save_head(adapter_save_path, adapter_name)
+  
 
+    # Save adapter configuration for loading
+    with open(os.path.join(versioned_output_dir, "adapter_config.json"), "w") as f:
+        json.dump({
+            "adapter_name": "ner_adapter",
+            "base_model": model_name
+        }, f, indent=2)
+    
     # Save model configuration with label mappings
     model_config = {
         "base_model": model_name,
@@ -328,8 +333,7 @@ def train_model(model_name=MODEL_NAME):
         "id2label": {str(i): label for label, i in LABELS.items()},
         "label2id": LABELS,
         "version": next_version,
-        "adapter_name": adapter_name,
-        "use_crf": False  # Always set to False since we're not using CRF
+        "adapter_based": True  # Add flag to indicate this is adapter-based
     }
 
     # Save with the expected filename for load_model compatibility

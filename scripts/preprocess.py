@@ -1,5 +1,6 @@
 import json
-import shutil  # Add this import
+import shutil
+import random
 from transformers import AutoTokenizer
 from datasets import Dataset
 import os
@@ -126,10 +127,121 @@ def tokenize_and_align_labels(examples):
     tokenized_inputs["labels"] = labels
     return tokenized_inputs
 
+def augment_dataset(dataset, augmentation_factor=0.3):
+    """
+    Augment dataset with entity substitution techniques.
+    
+    Args:
+        dataset: Dataset to augment
+        augmentation_factor: Ratio of new examples to generate (relative to original size)
+    
+    Returns:
+        Augmented dataset with original and new examples
+    """
+    # Extract all person entities from dataset for substitution
+    person_entities = {}  # Will store {entity_type: [list of entities]}
+    
+    print("Collecting entities for augmentation...")
+    
+    # First pass: collect all entities
+    for example in dataset:
+        tokens = example["tokens"]
+        tags = example["ner_tags"]
+        
+        i = 0
+        while i < len(tags):
+            # Check for B- tag (beginning of entity)
+            if tags[i] == LABELS["B-PERSON"]:
+                # Extract the entity
+                entity_tokens = [tokens[i]]
+                entity_type = "PERSON"
+                j = i + 1
+                
+                # Continue until end of entity
+                while j < len(tags) and tags[j] == LABELS["I-PERSON"]:
+                    entity_tokens.append(tokens[j])
+                    j += 1
+                
+                # Store the entity
+                if entity_type not in person_entities:
+                    person_entities[entity_type] = []
+                person_entities[entity_type].append(entity_tokens)
+                
+                # Move to next token after this entity
+                i = j
+            else:
+                i += 1
+    
+    # Check if we found any entities to work with
+    if not person_entities or "PERSON" not in person_entities or len(person_entities["PERSON"]) <= 1:
+        print("Warning: Not enough entities found for augmentation!")
+        return dataset
+        
+    print(f"Found {len(person_entities.get('PERSON', []))} person entities for augmentation")
+    
+    # Determine number of examples to generate
+    num_to_augment = int(len(dataset) * augmentation_factor)
+    augmented_examples = []
+    
+    print(f"Generating {num_to_augment} augmented examples...")
+    
+    # Generate new examples through entity substitution
+    for _ in range(num_to_augment):
+        # Select a random example to augment
+        example_idx = random.randint(0, len(dataset) - 1)
+        example = dataset[example_idx]
+        tokens = example["tokens"].copy()
+        tags = example["ner_tags"].copy()
+        
+        # Find entity spans in this example
+        entity_spans = []  # Will store (start_idx, end_idx, entity_type)
+        i = 0
+        while i < len(tags):
+            if tags[i] == LABELS["B-PERSON"]:
+                start_idx = i
+                j = i + 1
+                while j < len(tags) and tags[j] == LABELS["I-PERSON"]:
+                    j += 1
+                entity_spans.append((start_idx, j, "PERSON"))
+                i = j
+            else:
+                i += 1
+        
+        # Skip if no entities to substitute
+        if not entity_spans:
+            continue
+        
+        # Choose a random entity to substitute
+        span_idx = random.randint(0, len(entity_spans) - 1)
+        start_idx, end_idx, entity_type = entity_spans[span_idx]
+        
+        # Find a different entity of the same type
+        original_entity = tokens[start_idx:end_idx]
+        candidates = [e for e in person_entities[entity_type] if e != original_entity]
+        
+        if not candidates:
+            continue
+            
+        replacement = random.choice(candidates)
+        
+        # Create new example with substituted entity
+        new_tokens = tokens[:start_idx] + replacement + tokens[end_idx:]
+        new_tags = tags[:start_idx] + [LABELS["B-PERSON"]] + [LABELS["I-PERSON"]] * (len(replacement) - 1) + tags[end_idx:]
+        
+        augmented_examples.append({"tokens": new_tokens, "ner_tags": new_tags})
+    
+    print(f"Created {len(augmented_examples)} new examples through entity substitution")
+    
+    # Combine original dataset with augmented examples
+    all_examples = dataset + augmented_examples
+    
+    return all_examples
+
 def preprocess(json_path=os.path.join(DATA_DIR, "json", "result.json"), 
                save_path=os.path.join(DATA_DIR, "tokenized_train"),
                is_testing=False,
-               ds_name="default"):
+               ds_name="default",
+               augment=True):
     """
     Preprocess dataset and save the tokenized version with train/validation/test splits.
     Also saves just the training split to a separate directory for accumulating training data.
@@ -139,6 +251,7 @@ def preprocess(json_path=os.path.join(DATA_DIR, "json", "result.json"),
         save_path: Path where to save the tokenized dataset
         is_testing: If True, all data will be placed in the test split for evaluation
         ds_name: Name to use when saving just the training split (default: "default")
+        augment: Whether to apply data augmentation (default: True)
     """
     data = load_dataset(json_path)
     
@@ -177,6 +290,8 @@ def preprocess(json_path=os.path.join(DATA_DIR, "json", "result.json"),
     
     # Create dataset from the data
     dataset = Dataset.from_list(data)
+    data = split_text_into_manageable_chunks(data)
+    dataset = Dataset.from_list(data)
     
     # Create a DatasetDict with appropriate splits
     from datasets import DatasetDict
@@ -203,6 +318,13 @@ def preprocess(json_path=os.path.join(DATA_DIR, "json", "result.json"),
             "validation": val_test_split["train"],
             "test": val_test_split["test"]
         })
+        
+        # Apply data augmentation to training split only
+        if augment:
+            print("Applying data augmentation to training split...")
+            augmented_train = augment_dataset(split_dataset["train"])
+            split_dataset["train"] = Dataset.from_list(augmented_train)
+            print(f"Training split size after augmentation: {len(split_dataset['train'])} examples")
         
         # Check for person entities in each split and print statistics
         for split_name, split_data in split_dataset.items():
