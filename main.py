@@ -5,7 +5,7 @@ import os
 import json
 
 # Then import transformers
-from transformers import AutoModelForTokenClassification, AutoTokenizer
+from transformers import AutoModelForTokenClassification, AutoTokenizer, AutoAdapterModel
 import transformers
 # Finally import your local modules
 from utils.config import PROJECT_DIR
@@ -29,108 +29,147 @@ class NER:
 
     def load_model(self, model_path=None):
         """
-        Load the model and tokenizer with proper handling of pre-trained NER models.
+        Load the model and tokenizer with proper handling of adapter-based NER models.
         """
         if model_path is None:
             model_path = os.path.join(PROJECT_DIR, "models", "roberta-finetuned-ner")
         
-        # Check if model_path is a local path or a model ID
-        is_local_path = os.path.exists(model_path)
-        is_pretrained_ner = "ner" in model_path.lower() if not is_local_path else False
+        # Check if adapter-based model by looking for adapter_config.json
+        adapter_config_path = os.path.join(model_path, "adapter_config.json")
+        is_adapter_based = os.path.exists(adapter_config_path)
         
-        # Load default labels from config
+        # Get the model's configuration first
         from utils.config import ID2LABEL
         default_id2label = ID2LABEL
         
-        # Get the model's configuration first for pre-trained NER models
-        if is_pretrained_ner:
-            from transformers import AutoConfig
-            print(f"Loading pre-trained NER model config: {model_path}")
+        if is_adapter_based:
+            # Load adapter configuration
+            with open(adapter_config_path, "r") as f:
+                adapter_config = json.load(f)
+            
+            # Load base model with adapter support
+            base_model = adapter_config.get("base_model", self.base_model)
+            self.model = AutoAdapterModel.from_pretrained(base_model).to(self.device)
+            
+            # Load tokenizer
+            self.tokenizer = AutoTokenizer.from_pretrained(base_model)
+            
+            # Load adapter
+            adapter_name = adapter_config.get("adapter_name", "ner_adapter")
+            adapter_path = os.path.join(model_path, "adapter")
+            
+            if os.path.exists(adapter_path):
+                self.model.load_adapter(adapter_path)
+                self.model.set_active_adapters(adapter_name)
+                print(f"Loaded adapter '{adapter_name}' from {adapter_path}")
+            else:
+                print(f"Warning: Adapter directory not found at {adapter_path}")
+            
+            # Try to load label mapping
             try:
-                config = AutoConfig.from_pretrained(model_path)
-                if hasattr(config, "id2label"):
-                    # Use the pre-trained model's labels directly
-                    self.id2label = {str(k): v for k, v in config.id2label.items()}
-                    print(f"Using pre-trained model's label mapping: {self.id2label}")
-                else:
-                    # Unlikely, but fallback to default
-                    self.id2label = default_id2label
-                    print("Pre-trained model has no id2label mapping, using default")
-            except Exception as e:
-                print(f"Error loading pre-trained model config: {e}")
+                with open(os.path.join(model_path, "model_config.json"), "r") as f:
+                    model_config = json.load(f)
+                    self.id2label = model_config["id2label"]
+            except:
                 self.id2label = default_id2label
-                
-            # Now load the model with its original configuration
-            print(f"Loading pre-trained NER model with its original configuration")
-            self.model = AutoModelForTokenClassification.from_pretrained(model_path).to(self.device)
-            self.tokenizer = AutoTokenizer.from_pretrained(model_path)
-            
-            # Update id2label from actually loaded model to be safe
-            self.id2label = {str(k): v for k, v in self.model.config.id2label.items()}
-            print(f"Final id2label mapping: {self.id2label}")
-            
         else:
             # The rest of your existing code for non-NER models
-            if is_local_path:
-                # Load from local path with model_config.json
-                try:
-                    with open(os.path.join(model_path, "model_config.json"), "r") as f:
-                        model_config = json.load(f)
-                        self.id2label = model_config["id2label"]
-                except (FileNotFoundError, json.JSONDecodeError) as e:
-                    print(f"Warning: Could not load model_config.json: {e}")
-                    # Use default labels
-                    self.id2label = default_id2label
-            else:
-                # For Hugging Face models, load and extract the id2label from the config
-                print(f"Loading model from Hugging Face Hub: {model_path}")
+            is_local_path = os.path.exists(model_path)
+            is_pretrained_ner = "ner" in model_path.lower() if not is_local_path else False
+            
+            # Load default labels from config
+            from utils.config import ID2LABEL
+            default_id2label = ID2LABEL
+            
+            # Get the model's configuration first for pre-trained NER models
+            if is_pretrained_ner:
                 from transformers import AutoConfig
+                print(f"Loading pre-trained NER model config: {model_path}")
                 try:
                     config = AutoConfig.from_pretrained(model_path)
                     if hasattr(config, "id2label"):
-                        # Check if this is a compatible NER model
-                        ner_labels = set(['O', 'B-PER', 'I-PER', 'B-ORG', 'I-ORG', 'B-LOC', 'I-LOC', 'B-MISC', 'I-MISC', 
-                                         'B-PERSON', 'I-PERSON'])
-                        config_labels = set(config.id2label.values())
-                        
-                        if len(ner_labels.intersection(config_labels)) >= 3 or len(config.id2label) == len(default_id2label):
-                            self.id2label = config.id2label
-                            print(f"Using model's label mapping: {self.id2label}")
-                        else:
-                            print(f"Model has different id2label mapping: {config.id2label}")
-                            print("Using default NER labels instead")
-                            self.id2label = default_id2label
+                        # Use the pre-trained model's labels directly
+                        self.id2label = {str(k): v for k, v in config.id2label.items()}
+                        print(f"Using pre-trained model's label mapping: {self.id2label}")
                     else:
-                        print("Model has no id2label mapping, using default NER labels")
+                        # Unlikely, but fallback to default
                         self.id2label = default_id2label
+                        print("Pre-trained model has no id2label mapping, using default")
                 except Exception as e:
-                    print(f"Error loading model config from Hub: {e}")
-                    print("Using default NER labels instead")
+                    print(f"Error loading pre-trained model config: {e}")
                     self.id2label = default_id2label
-            
-            # Ensure our ID2LABEL keys match the loaded model's expected range
-            normalized_id2label = {str(i): label for i, label in enumerate(self.id2label.values())}
-            self.id2label = normalized_id2label
-            
-            # Load model with our configuration
-            if not is_local_path:
-                # When loading from HuggingFace, force our label mapping
-                print(f"Enforcing custom NER label mapping for {model_path}")
-                config = AutoConfig.from_pretrained(
-                    model_path,
-                    num_labels=len(self.id2label),
-                    id2label=self.id2label,
-                    label2id={label: int(id) for id, label in self.id2label.items()}
-                )
-                self.model = AutoModelForTokenClassification.from_pretrained(
-                    model_path, 
-                    config=config
-                ).to(self.device)
-            else:
-                # For local models, load directly
+                    
+                # Now load the model with its original configuration
+                print(f"Loading pre-trained NER model with its original configuration")
                 self.model = AutoModelForTokenClassification.from_pretrained(model_path).to(self.device)
-            
-            self.tokenizer = AutoTokenizer.from_pretrained(model_path)
+                self.tokenizer = AutoTokenizer.from_pretrained(model_path)
+                
+                # Update id2label from actually loaded model to be safe
+                self.id2label = {str(k): v for k, v in self.model.config.id2label.items()}
+                print(f"Final id2label mapping: {self.id2label}")
+                
+            else:
+                # The rest of your existing code for non-NER models
+                if is_local_path:
+                    # Load from local path with model_config.json
+                    try:
+                        with open(os.path.join(model_path, "model_config.json"), "r") as f:
+                            model_config = json.load(f)
+                            self.id2label = model_config["id2label"]
+                    except (FileNotFoundError, json.JSONDecodeError) as e:
+                        print(f"Warning: Could not load model_config.json: {e}")
+                        # Use default labels
+                        self.id2label = default_id2label
+                else:
+                    # For Hugging Face models, load and extract the id2label from the config
+                    print(f"Loading model from Hugging Face Hub: {model_path}")
+                    from transformers import AutoConfig
+                    try:
+                        config = AutoConfig.from_pretrained(model_path)
+                        if hasattr(config, "id2label"):
+                            # Check if this is a compatible NER model
+                            ner_labels = set(['O', 'B-PER', 'I-PER', 'B-ORG', 'I-ORG', 'B-LOC', 'I-LOC', 'B-MISC', 'I-MISC', 
+                                             'B-PERSON', 'I-PERSON'])
+                            config_labels = set(config.id2label.values())
+                            
+                            if len(ner_labels.intersection(config_labels)) >= 3 or len(config.id2label) == len(default_id2label):
+                                self.id2label = config.id2label
+                                print(f"Using model's label mapping: {self.id2label}")
+                            else:
+                                print(f"Model has different id2label mapping: {config.id2label}")
+                                print("Using default NER labels instead")
+                                self.id2label = default_id2label
+                        else:
+                            print("Model has no id2label mapping, using default NER labels")
+                            self.id2label = default_id2label
+                    except Exception as e:
+                        print(f"Error loading model config from Hub: {e}")
+                        print("Using default NER labels instead")
+                        self.id2label = default_id2label
+                
+                # Ensure our ID2LABEL keys match the loaded model's expected range
+                normalized_id2label = {str(i): label for i, label in enumerate(self.id2label.values())}
+                self.id2label = normalized_id2label
+                
+                # Load model with our configuration
+                if not is_local_path:
+                    # When loading from HuggingFace, force our label mapping
+                    print(f"Enforcing custom NER label mapping for {model_path}")
+                    config = AutoConfig.from_pretrained(
+                        model_path,
+                        num_labels=len(self.id2label),
+                        id2label=self.id2label,
+                        label2id={label: int(id) for id, label in self.id2label.items()}
+                    )
+                    self.model = AutoModelForTokenClassification.from_pretrained(
+                        model_path, 
+                        config=config
+                    ).to(self.device)
+                else:
+                    # For local models, load directly
+                    self.model = AutoModelForTokenClassification.from_pretrained(model_path).to(self.device)
+                
+                self.tokenizer = AutoTokenizer.from_pretrained(model_path)
         
         self.model.eval()    
         return self
@@ -156,7 +195,7 @@ class NER:
             return
         try:
             # Preprocess the training data
-            preprocess(ds_name=save_train)
+            preprocess(ds_name=save_train, augment=True)
         except Exception as e:
             print(f"Error during data preprocessing: {e}")
             return
@@ -187,31 +226,22 @@ class NER:
     
     def optimize_hyperparameters(self, n_trials=16, visualize=False):
         """
-        Optimize hyperparameters for model training using Optuna.
-        
-        Args:
-            n_trials: Number of optimization trials to run (default: 16)
-            visualize: Whether to display optimization visualizations (default: False)
-            
-        Returns:
-            Dictionary with best hyperparameters and optimization results
+        Optimize hyperparameters for model training using Optuna with adapter-based approach.
         """
         import optuna
         from transformers import (
-            AutoModelForTokenClassification, 
             Trainer, 
             TrainingArguments,
             DataCollatorForTokenClassification,
-            EvalPrediction
         )
+        from adapters import AdapterConfig, AutoAdapterModel
         from datasets import load_from_disk
-        from sklearn.metrics import precision_recall_fscore_support
         import numpy as np
         import os
         import json
         import tempfile
         from datetime import datetime
-        from utils.config import PROJECT_DIR, DATASET_PATH, BEST_PARAMS_PATH
+        from utils.config import PROJECT_DIR, DATASET_PATH, BEST_PARAMS_PATH, LABELS, NUM_LABELS
         from utils.metrics import compute_metrics
         
         # Ensure we have a tokenized dataset
@@ -224,7 +254,7 @@ class NER:
         print("Loading tokenized dataset...")
         tokenized_dataset = load_from_disk(dataset_path)
         
-        # Create only one results directory for final results
+        # Create results directory for final results
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         results_dir = os.path.join(PROJECT_DIR, "optimization")
         os.makedirs(results_dir, exist_ok=True)
@@ -234,6 +264,43 @@ class NER:
             from transformers import AutoTokenizer
             self.tokenizer = AutoTokenizer.from_pretrained(self.base_model)
             
+        # Create a focal loss trainer for hyperparameter optimization
+        class FocalLossTrainer(Trainer):
+            def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
+                labels = inputs.pop("labels")
+                outputs = model(**inputs)
+                logits = outputs.logits
+                
+                # Parameters for focal loss
+                gamma = 2.0  # Focusing parameter
+                alpha = self.class_weights.to(model.device)
+                
+                # Compute probabilities
+                probs = torch.softmax(logits.view(-1, NUM_LABELS), dim=-1)
+                
+                # Create one-hot encoding of labels
+                active_loss = labels.view(-1) != -100
+                active_labels = torch.where(active_loss, labels.view(-1), torch.tensor(0).type_as(labels))
+                
+                one_hot = torch.zeros_like(probs).scatter_(1, active_labels.unsqueeze(1), 1)
+                
+                # Compute focal weights
+                pt = (one_hot * probs).sum(1) + 1e-10
+                focal_weight = (1 - pt) ** gamma
+                
+                # Get class weights for each sample
+                alpha_weight = torch.gather(alpha, 0, active_labels)
+                
+                # Compute focal loss
+                loss = -alpha_weight * focal_weight * torch.log(pt)
+                
+                # Apply mask for padding
+                loss = torch.where(active_loss, loss, torch.tensor(0.0).type_as(loss))
+                
+                loss = loss.mean()
+                
+                return (loss, outputs) if return_outputs else loss
+                
         # Define the optimization objective
         def objective(trial):
             # Define hyperparameters to optimize
@@ -241,28 +308,42 @@ class NER:
             per_device_train_batch_size = trial.suggest_categorical("per_device_train_batch_size", [8, 16, 32])
             weight_decay = trial.suggest_float("weight_decay", 0.0, 0.3)
             learning_rate = trial.suggest_float("learning_rate", 1e-5, 5e-5, log=True)
-            
-            # Add these parameters to trial
             person_weight = trial.suggest_float("person_weight", 3.0, 7.0)  # Try different person weights
+            
+            # Adapter-specific parameters
+            reduction_factor = trial.suggest_categorical("reduction_factor", [16, 32, 64])
             
             # Use a temporary directory for this trial that will be cleaned up automatically
             with tempfile.TemporaryDirectory() as trial_dir:
                 print(f"Trial {trial.number} using temporary directory: {trial_dir}")
                 
-                # Get the number of labels from the config
-                from utils.config import ID2LABEL, LABELS
-                num_labels = len(ID2LABEL)
+                # Use AutoAdapterModel instead of AutoModelForTokenClassification
+                model = AutoAdapterModel.from_pretrained(self.base_model)
                 
-                # Prepare model
-                model = AutoModelForTokenClassification.from_pretrained(
-                    self.base_model, 
-                    num_labels=num_labels
+                # Add NER adapter
+                adapter_config = AdapterConfig.load(
+                    "pfeiffer",  # Efficient adapter architecture
+                    reduction_factor=reduction_factor  # Controls adapter size (trial parameter)
+                )
+                model.add_adapter("ner_adapter", config=adapter_config)
+                
+                # Add NER classification head
+                model.add_classification_head(
+                    "ner_adapter",
+                    num_labels=NUM_LABELS,
+                    id2label={str(i): label for label, i in LABELS.items()}
                 )
                 
+                # Activate the adapter
+                model.train_adapter("ner_adapter")
+                
+                # Freeze base model parameters
+                model.freeze_model(True)
+                
                 # Apply class weights during training
-                class_weights = torch.ones(num_labels)
+                class_weights = torch.ones(NUM_LABELS)
                 class_weights[0] = 0.5  # Reduce weight for "O" tag
-                class_weights[1] = person_weight  # Use the optimized person weight
+                class_weights[1] = person_weight  # Use the trial's person weight
                 class_weights[2] = person_weight * 0.6  # I-PERSON slightly lower
                 if "TITLE" in LABELS:
                     class_weights[3] = 1.5  # Small increase for TITLE
@@ -290,16 +371,19 @@ class NER:
                     report_to="none",
                 )
                 
-                # Initialize Trainer
-                trainer = Trainer(
+                # Initialize custom trainer with focal loss
+                trainer = FocalLossTrainer(
                     model=model,
                     args=training_args,
                     train_dataset=tokenized_dataset["train"],
                     eval_dataset=tokenized_dataset["validation"],
                     tokenizer=self.tokenizer,
                     data_collator=data_collator,
-                    compute_metrics=compute_metrics,  # Use the imported function
+                    compute_metrics=compute_metrics,
                 )
+                
+                # Add class weights as trainer attribute for focal loss
+                trainer.class_weights = class_weights
                 
                 # Train the model
                 trainer.train()
@@ -311,10 +395,10 @@ class NER:
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
                     
-                return eval_results["eval_weighted_f1"]  # This matches our new metric name
+                return eval_results["eval_weighted_f1"]  # This matches our metric name
         
         # Create and run Optuna study
-        print(f"Starting hyperparameter optimization with {n_trials} trials...")
+        print(f"Starting hyperparameter optimization with {n_trials} trials using adapters...")
         study = optuna.create_study(
             direction="maximize",
             pruner=optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=0)
@@ -328,7 +412,7 @@ class NER:
             best_params = study.best_params
             best_value = study.best_value
             
-            # Save only the final optimization results
+            # Save optimization results
             results = {
                 "best_params": best_params,
                 "best_f1_score": best_value,
@@ -341,18 +425,15 @@ class NER:
             with open(BEST_PARAMS_PATH, "w") as f:
                 json.dump(results, f, indent=2)
             
-            
-            
             # Visualization if requested
             if visualize:
-                # Print results only
                 print(f"\nOptimization Results:\n{'-'*20}")
                 print(f"Best F1 Score: {best_value:.4f}")
                 print("Best hyperparameters:")
                 for param, value in best_params.items():
                     print(f"  {param}: {value}")
             
-            print(f"Optimization complete. Results saved to {results_dir}")
+            print(f"Optimization complete. Results saved to {BEST_PARAMS_PATH}")
             return results
         except Exception as e:
             print(f"Optimization failed with error: {e}")
@@ -360,14 +441,14 @@ class NER:
     
     def predict(self, text):
         """
-        Predict named entities in the given text.
-
-        :param text: Input string to analyze.
-        :return: List of named entities found in the text.
+        Predict named entities in the given text, supporting adapter-based models.
         """
         # Load model if not already loaded
         if self.model is None or self.tokenizer is None:
             self.load_model()
+        
+        # Check if this is an adapter model
+        is_adapter_based = hasattr(self.model, "get_adapter") and self.model.get_adapter() is not None
         
         # Tokenize input text
         encoded_input = self.tokenizer(text, 
@@ -385,10 +466,13 @@ class NER:
         
         # Run inference
         with torch.no_grad():
-            outputs = self.model(input_ids=input_ids, attention_mask=attention_mask)
-        
-        # Get predictions
-        predictions = np.argmax(outputs.logits.cpu().numpy(), axis=2)[0]
+            outputs = self.model(**encoded_input)
+            
+        # Get predictions - adapter models have a different output structure
+        if is_adapter_based:
+            predictions = np.argmax(outputs[0].cpu().numpy(), axis=2)[0]
+        else:
+            predictions = np.argmax(outputs.logits.cpu().numpy(), axis=2)[0]
         
         # Map predictions to entities in the original text
         entities = []
