@@ -4,9 +4,9 @@ import sys
 import csv
 import ast
 import re
-from utils.config import LABELS, PERSON_TAG_PATTERN, TITLES, SCRIPTS_DIR, PROJECT_DIR
+from utils.config import PERSON_TAG_PATTERN, TITLES, PROJECT_DIR
 
-
+LABELS = {"O": 0, "B-PERSON": 1, "I-PERSON": 2, "TITLE": 3}
 json_dir = os.path.join(PROJECT_DIR, "data", "json")
 def convert_csv_to_json(csv_file_path, json_file_path=os.path.join(json_dir,"result.json"), replace=True):
     dataset = []

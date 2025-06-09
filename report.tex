@@ -1,0 +1,534 @@
+\documentclass[a4paper]{usiinfbachelorproject}
+
+\captionsetup{labelfont={bf}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%% PACKAGES %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\usepackage{float}
+\usepackage{amsmath}
+
+%%% Main Body %%%
+
+\author{Daniel Dorigo }
+
+\title{\textbf{Project Title}}
+\subtitle{Subtitle}
+\versiondate{\today}
+
+\begin{committee}
+%With more than 1 advisor an error is raised...: only 1 advisor   \item \textbf{F1-score for the \texttt{PER} tag}: This measures the model's ability to correctly identify proper person names, balancing precision (the proportion of predicted person entities that are actually correct) and recall (the proportion of actual person entities that are correctly identified). F1-score is the harmonic mean of precision and recall, providing a single metric that accounts for both false positives and false negatives.s allowed!
+\advisor[Universit\`a della Svizzera Italiana, Switzerland]{ }{prof. Monica }{Landoni }
+%You can comment out  these lines if you don't have any assistant
+%\coadvisor[Universit\`a della Svizzera Italiana, Switzerland]{ }{Firstname}{Lastname}
+
+\end{committee}
+
+\abstract {
+This project presents the development of a specialized Named Entity Recognition (NER) system based on RoBERTa-base architecture (a robustly optimized BERT pretraining approach), designed to accurately identify proper person names while distinguishing them from occupational titles in web-based textual content. The work addresses critical limitations in general-purpose NER models that frequently misclassify job titles as person entities, particularly in informal internet text domains.
+\\ \\ 
+The implemented system features a novel hybrid architecture combining RoBERTa contextual embeddings with Conditional Random Fields (CRF) for sequence labeling, enhanced by multi-component loss functions including focal loss for class imbalance handling and boundary-weighted Dice loss for improved entity span detection. A dedicated TITLE label was introduced to explicitly distinguish occupational roles from proper names, addressing a gap in existing NER taxonomies.
+\\ \\ 
+The model incorporates sophisticated training optimizations including a two-phase hyperparameter search using Optuna with a dedicated simplified model variant for rapid parameter exploration, confidence-based post-processing heuristics, and person-name substitution data augmentation. The system supports dynamic label configuration, enabling training with or without TITLE tags based on dataset characteristics, and includes both simplified and complex model variants for different computational requirements.
+\\ \\
+A comprehensive two-phase optimization pipeline was developed, featuring broad parameter space exploration followed by focused search refinement. The system achieved strong performance on the CONLL-2003 benchmark while maintaining efficiency suitable for practical deployment. These results demonstrate that task-specific, lightweight models can achieve competitive performance with considerably lower computational overhead than large general-purpose systems.
+
+\\ \\
+\textbf{Keywords}: Named Entity Recognition; Person Name Extraction; RoBERTa; Conditional Random Fields; Hyperparameter Optimization; Web Text Processing
+
+}
+\begin{document}
+\maketitle
+\tableofcontents\newpage
+%\listoffigures\newpage
+
+\section{\textbf{Introduction}}
+%Context.
+Named Entity Recognition (NER) is a core task in Natural Language Processing (NLP), involving the detection and categorization of named entities-such as people, organizations, and locations-within unstructured text. With the widespread adoption of transformer-based models like BERT \cite{devlin-etal-2019-bert} and RoBERTa \cite{liu2019roberta}, the task has seen substantial improvements in accuracy across general benchmarks. However, applications requiring high precision in narrow domains, such as identifying proper names in informal or web-derived language, often expose the limitations of such broad models.
+\\ \\
+%Problem. 
+This project was motivated by a real-world use case: extracting CEO names from company websites as part of a web-scraping pipeline. In this setting, existing NER systems frequently misidentified roles, titles, or nicknames as names, leading to unreliable outputs. These limitations highlighted the need for a specialized NER model with stronger performance in recognizing proper names-particularly under the noisy and non-standard conditions typical of internet text.
+\\ \\
+%Limitations in the State of the Art.
+While general-purpose transformer models have raised the baseline for NER, they tend to conflate named entities with related but distinct concepts (e.g., job titles). Large Language Models (LLMs), such as GPT-3\cite{brown2020languagemodelsfewshotlearners} and GPT-4, have further broadened the approach by applying unsupervised, in-context learning across many NLP tasks. Yet, their generality often comes at the expense of consistency, interpretability, and efficiency-particularly in niche tasks where high recall and precision are critical. In such settings, even the most powerful LLMs may underperform due to their lack of domain-specific supervision \cite{DBLP:journals/corr/abs-2304-10428}.
+\\ \\ 
+%Contribution and Findings.
+This work explores whether a fine-tuned, task-specific model based on the RoBERTa architecture can achieve competitive performance in recognizing proper names while maintaining computational efficiency. The model incorporates several technical innovations: a hybrid RoBERTa-CRF architecture for improved sequence modeling, multi-component loss functions combining focal and Dice losses to address class imbalance and boundary detection, and a two-phase hyperparameter optimization strategy using Optuna for systematic parameter space exploration.
+
+A novel TITLE label was introduced to disambiguate occupational titles from person names, improving output reliability in business and web contexts. The system features dynamic label configuration capabilities, allowing adaptation to datasets with or without title annotations. Additionally, a sophisticated data augmentation pipeline using person-name substitution and confidence-based post-processing heuristics enhance model robustness and prediction quality. The implementation supports both simplified and complex model variants, enabling deployment across different computational constraints while maintaining strong performance on standard benchmarks.
+
+
+
+
+\section{\textbf{Background}}
+	\subsection{NER and the Challenge of Proper Name Identification}
+
+Named Entity Recognition (NER) has long been a core task in Natural Language Processing (NLP), aimed at identifying and classifying entities such as persons, locations, and organizations from raw text. While traditional models such as Conditional Random Fields (CRFs) laid the groundwork for early success, modern systems primarily rely on transformer-based architectures like BERT and RoBERTa, which leverage contextual embeddings to achieve state-of-the-art performance across a range of general-purpose benchmarks such as CONLL-2003 (a widely-used English NER dataset from the Conference on Natural Language Learning) and OntoNotes 5 (a large-scale multilingual dataset with comprehensive entity annotations)~\cite{inbook}.
+
+Despite these advances, the broad focus of such models often results in overgeneralization when applied to more specialized or noisy domains. One recurring issue is the conflation of occupational roles (e.g., \textit{manager}, \textit{director}) with proper person names. This misclassification becomes particularly problematic in real-world applications such as web scraping, where distinguishing between a specific individual and their role is essential. For example, in a sentence like \textit{"The manager fired me,"} general-purpose models frequently tag \textit{manager} as a person entity, which may lead to semantic errors in downstream tasks such as automated document labeling, user profiling, or knowledge base population.
+
+Treating proper names differently from common nouns, including occupational titles, is thus not merely a refinement but a practical necessity in domains like business intelligence, social media monitoring, and unstructured data mining. In the motivating use case for this project a web scraper aimed at extracting CEO names from company websites this distinction was foundational to accurate extraction.
+\subsection{Transformers}
+Transformers are a type of deep learning architecture introduced in the paper "Attention is All You Need" \cite{vaswani2023attentionneed} (by Vaswani et al. 2017). Transformers use a mechanism known as self-attention to process entire sequences in parallel, in contrast to other models like Recurrent Neural Networks (RNNs) or Long-Short Term Memories (LSTMs), which process input sequences step by step. This enables the model to consider each word's relative importance in a sentence, regardless of its position. The primary goal is to effectively and adaptably capture the contextual relationships between words.
+
+\subsection{BERT models:}
+BERT (Bidirectional Encoder Representations from Transformers) is a deep learning model developed by Google\cite{devlin2019bertpretrainingdeepbidirectional} that has become a foundational architecture in modern natural language processing. BERT, which is based on the Transformer encoder, is intended to jointly condition on both left and right context in every layer in order to pre-train deep bidirectional representations. This implies that rather than only understanding words that come before or after, it can also understand the meaning of a word in relation to all of its surrounding words. Two unsupervised tasks are used to pre-train BERT on a large corpus of unlabeled text: Next Sentence Prediction (NSP), which teaches the model the relationship between paired sentences, and Masked Language Modeling (MLM), which masked random words in a sentence and taught the model to predict them. After pre-training, BERT can be fine-tuned with additional layers to perform specific NLP tasks such as question answering, text classification, or named entity recognition with minimal architecture changes.
+
+\subsection{General-Purpose vs Task-Specific NER}
+
+Although general-purpose NER models demonstrate impressive overall performance, they are not explicitly trained to handle fine-grained distinctions such as the separation of proper names from occupational roles. Evaluation benchmarks like CONLL-2003 include person entities as a broad category, but no widely adopted dataset exists for the narrower task of proper name extraction alone.
+
+Furthermore, to the best of my knowledge, no prior work has introduced a dedicated label class to explicitly identify occupational titles. This omission reflects the underlying assumption of most NER pipelines: that entities can be categorized into a handful of coarse-grained types, without accounting for intra-category subtleties that may be critical in applied scenarios.
+
+One study evaluating NER performance in a niche context philosophical texts\cite{weijers2025evaluation}(Weijers \& Bloem et. al. NLP4DH 2025) found that even in constrained domains, specialized tuning and model choices matter. In that case, a trained version of Flair~\cite{akbik-etal-2019-flair}(Akbik et al., NAACL 2019) achieved the best F1 score (0.91), outperforming other models that used different methods (rule-based, LLMs with general-tuning...) on targeted tasks. This suggests that for subdomains of NER, specialization can rival or even exceed brute-force generalization.
+
+\subsection{Large Language Models and the Limits of Generalization}
+
+The recent emergence of large language models (LLMs) such as GPT-3 and GPT-4 has shifted attention toward unsupervised, in-context learning approaches for a variety of NLP tasks, including NER. In this paradigm, models generate responses based on prompt structure and context, often without requiring fine-tuning or labeled datasets. While this flexibility is appealing, it introduces significant drawbacks: hallucination, interpretability issues, and inconsistent behavior in low-resource or highly specific contexts.
+
+As highlighted in GPT-NER by \cite{DBLP:journals/corr/abs-2304-10428}(WANG, Shuhe, et. al. 2023), LLMs are prone to various issues due to the intrinsic gap between the two tasks of NER and LLMs, NER is a sequence labeling task, while e LLMs are formalized under a text generation task.
+
+
+
+\subsection{Positioning of This Work}
+
+To address these limitations, this project focuses on a compact, task-specific NER model designed explicitly to identify proper person names while distinguishing them from occupational titles. In contrast to most prior work, which operates on broad entity categories, this approach narrows the scope of recognition to maximize precision and relevance in web-based content such as company pages, social media, and newsletters.
+
+Unlike existing benchmarks that rely solely on curated corpora such as CONLL-2003, this work incorporates a blend of established and custom-built datasets gathered via a tailored scraping pipeline. These datasets reflect informal and domain-specific linguistic patterns often absent in traditional training corpora.
+
+In addition, a novel \texttt{TITLE} label was introduced to annotate occupational roles explicitly something not found in any of the surveyed literature. This provides the model with an additional degree of supervision, allowing it to learn not just what a person name is, but also what it is not.
+
+While hyperparameter optimization is a standard technique in machine learning, its application here via Optuna ensures that the model remains both lightweight and performant, without sacrificing adaptability to noisy input domains.
+
+\section{\textbf{Technical Implementation}}
+
+\subsection{System Architecture Overview}
+
+The implemented NER system employs a modular architecture built around the HuggingFace Transformers ecosystem, featuring dynamic configuration management and flexible model variants. The core system supports two primary model architectures: a simplified RoBERTa-CRF model optimized for efficiency and a complex variant with enhanced attention mechanisms and multi-component loss functions.
+
+\subsection{Dynamic Label Configuration System}
+
+A key innovation in this implementation is the dynamic label configuration system that automatically detects and adapts to different labeling schemes. The system implements a \texttt{get\_label\_config()} function that determines whether to include TITLE tags based on dataset characteristics or explicit configuration. This enables training on datasets with varying annotation schemas:
+
+\begin{itemize}
+    \item \textbf{Standard NER Schema}: Uses conventional B-PERSON, I-PERSON, and O labels for traditional person entity recognition.
+    \item \textbf{Enhanced Schema with Titles}: Extends the label set with B-TITLE and I-TITLE tags to explicitly model occupational roles and honorifics.
+\end{itemize}
+
+Both schemas follow the BIO (Begin-Inside-Outside) tagging convention, where B- tags mark the beginning of an entity, I- tags mark tokens inside an entity (continuation), and O tags mark tokens outside any entity. This encoding ensures unambiguous entity boundary detection and supports multi-token entities.
+
+The label configuration system maintains consistency across training, evaluation, and inference phases, automatically saving and loading configuration metadata to ensure reproducibility across experimental runs.
+
+\subsection{Hybrid Model Architectures}
+
+\subsubsection{Simplified RoBERTa-CRF Model}
+
+The simplified variant (\texttt{SimplifiedRobertaCRFForTokenClassification}) combines RoBERTa's contextual embeddings with CRF sequential constraints for improved boundary detection. This architecture prioritizes computational efficiency while maintaining strong performance, making it particularly well-suited for hyperparameter exploration and optimization trials where rapid experimentation is essential:
+
+\begin{itemize}
+    \item Pre-trained RoBERTa-base backbone for contextual token representations
+    \item Linear classification layer projecting hidden states to label space
+    \item CRF layer enforcing valid BIO tag transitions
+    \item Streamlined forward pass optimized for inference speed and rapid hyperparameter search
+\end{itemize}
+
+\subsubsection{Enhanced Complex Model}
+
+The complex variant (\texttt{RobertaCRFForTokenClassification}) incorporates additional architectural components for improved performance on challenging datasets:
+
+\begin{itemize}
+    \item \textbf{Cross-Attention Span Classifier}: Implements multi-head attention mechanisms (parallel attention computations that allow the model to focus on different types of relationships simultaneously) to capture long-range dependencies within entity spans.
+    \item \textbf{Relative Position Embeddings}: Enhanced attention computation with relative positional encodings for better entity boundary detection.
+    \item \textbf{Parameterized Architecture}: Configurable attention heads, relative position windows, and dropout rates for fine-grained optimization.
+\end{itemize}
+
+\subsection{Multi-Component Loss Function Design}
+
+The system implements a sophisticated loss combination strategy addressing multiple aspects of NER performance:
+
+\subsubsection{Focal Loss for Class Imbalance}
+
+Focal loss is a specialized loss function designed to address class imbalance problems in classification tasks. Unlike standard cross-entropy loss, focal loss reduces the loss contribution from easily classified examples and focuses learning on hard, misclassified examples. This is particularly important in NER where non-entity tokens (O tags) vastly outnumber entity tokens, creating a severe class imbalance that can bias models toward predicting non-entities.
+
+Implemented focal loss with parameterized class weights to address the inherent imbalance in NER datasets where entity tokens are significantly outnumbered by non-entity tokens:
+
+\begin{equation}
+    FL(p_t) = -\alpha_t(1-p_t)^\gamma \log(p_t)
+\end{equation}
+
+where $p_t$ is the predicted probability for the true class, $\alpha_t$ is a class-specific weighting factor that addresses class imbalance, and $\gamma$ is the focusing parameter that controls how much the loss focuses on hard examples. When $\gamma = 0$, focal loss reduces to standard cross-entropy loss; higher $\gamma$ values increasingly down-weight easy examples.
+
+The implementation includes specific weighting for PERSON entities (\texttt{person\_weight}) and optional TITLE entity weighting when available in the label schema.
+
+\subsubsection{Enhanced Boundary Dice Loss}
+
+Dice loss, originally developed for image segmentation, measures the overlap between predicted and true entity spans. Unlike token-level losses that treat each position independently, Dice loss considers the entire entity span as a unit, making it particularly suitable for sequence labeling tasks where entity boundaries are crucial.
+
+A novel boundary-weighted Dice loss implementation that emphasizes critical positions in entity spans:
+
+\begin{itemize}
+    \item \textbf{B-weight}: Enhanced importance for entity beginning tokens
+    \item \textbf{I-end weight}: Focus on entity ending positions
+    \item \textbf{Context weight}: Attention to pre-entity context tokens
+\end{itemize}
+
+This approach addresses common boundary detection errors that plague sequence labeling tasks.
+
+\subsubsection{CRF Loss Integration}
+
+Conditional Random Fields (CRF) are probabilistic models that consider the sequence structure in labeling tasks. Unlike independent token classification, CRFs model the dependencies between adjacent labels, ensuring that label transitions follow valid patterns. For example, in BIO tagging, a CRF prevents invalid transitions like O (Outside) directly to I-PERSON (Inside-Person), which violates the BIO constraint that Inside tags must follow Begin tags.
+
+The CRF component provides structured prediction capabilities, ensuring valid tag transitions and improving sequence-level consistency. The CRF weight parameter allows balancing between token-level and sequence-level optimization objectives.
+
+\subsection{Advanced Training Features}
+
+\subsubsection{Person-Name Substitution Augmentation}
+
+Data augmentation in NER traditionally involves techniques like synonym replacement or sentence paraphrasing, but these can disrupt entity boundaries or change semantic meaning. Person-name substitution is a domain-specific augmentation technique that systematically replaces existing person names in the training data with alternative names from a curated dictionary, while preserving the original sentence structure and maintaining exact BIO tag alignment.
+
+The data augmentation pipeline implements intelligent person name substitution that maintains semantic coherence while increasing name diversity:
+
+\begin{itemize}
+    \item Automatic extraction of person names from training corpora
+    \item Integration with external name dictionaries for broader coverage
+    \item Context-preserving substitution maintaining BIO tag consistency
+    \item Configurable augmentation factors for controlled dataset expansion
+\end{itemize}
+
+\subsubsection{Confidence-Based Post-Processing}
+
+A comprehensive post-processing system applies confidence-based heuristics to improve prediction quality:
+
+\begin{itemize}
+    \item Gap filling between high-confidence entity tokens
+    \item Invalid transition correction (e.g., O → I-PERSON becomes O → B-PERSON)
+    \item Noise suppression for isolated low-confidence predictions
+    \item Configurable confidence thresholds optimized during hyperparameter search
+\end{itemize}
+
+\subsection{Two-Phase Optimization Pipeline}
+
+The hyperparameter optimization system implements a sophisticated two-phase strategy using Optuna, an automatic hyperparameter optimization framework that employs advanced sampling algorithms like Tree-structured Parzen Estimator (TPE), a Bayesian optimization method that models the probability distribution of hyperparameters leading to good performance, to efficiently explore parameter spaces. Optuna's pruning capabilities allow early termination of unpromising trials, significantly reducing computational overhead during optimization.
+
+**The simplified model architecture is specifically employed throughout this optimization process to enable efficient parameter exploration while maintaining representative performance characteristics.**
+
+\subsubsection{Phase 1: Broad Exploration}
+\begin{itemize}
+    \item Wide parameter ranges covering architectural and training hyperparameters
+    \item Median pruning for early termination of unpromising trials (a technique that stops training trials whose intermediate results fall below the median performance of completed trials)
+    \item Reduced epoch count for faster iteration using the simplified model
+    \item Parameter importance analysis for search space refinement
+\end{itemize}
+
+\subsubsection{Phase 2: Focused Refinement}
+\begin{itemize}
+    \item Concentrated search around promising parameter regions identified in Phase 1
+    \item Statistical analysis of top-performing trials to define focused ranges
+    \item Increased training epochs for more reliable performance estimates
+    \item Enhanced pruning strategies for efficient resource utilization
+\end{itemize}
+
+The optimization pipeline automatically analyzes Phase 1 results, generates focused parameter ranges, and seamlessly transitions to Phase 2 search without manual intervention.
+
+\vspace{1em}
+\noindent
+In summary, this work contributes a specialized, efficient alternative to general-purpose NER systems by:
+\begin{itemize}
+  \item Defining a narrow task proper name recognition that reflects specific real-world needs.
+  \item Introducing a novel entity class for occupational roles, absent from prior NER taxonomies.
+  \item Leveraging a hybrid dataset combining canonical and scraped informal text.
+  \item Demonstrating that compact, supervised models can mitigate common failure cases in general-purpose and LLM-based systems.
+\end{itemize}
+
+   \subsection{Alternative Approaches Considered}
+
+\subsubsection{Initial Weighted Trainer Approach}
+Initially, an alternative training strategy was explored that leveraged a weighted trainer to address class imbalance by assigning different weights to samples during training. This approach aimed to emphasize less frequent entity classes such as B-PERSON and I-PERSON through token-level weighting.
+
+However, significant limitations were observed:
+\begin{itemize}
+    \item \textbf{Sequential Training Bias}: When training on multiple datasets sequentially, the model developed strong bias toward the most recently seen dataset, causing performance degradation on earlier datasets
+    \item \textbf{Token-Level Focus}: The approach prioritized individual token classification rather than holistic entity-level recognition
+\end{itemize}
+
+This approach was ultimately abandoned in favor of the current system, which addresses class imbalance through sophisticated multi-component loss functions and data augmentation strategies that proved more effective for balanced learning and entity segmentation.
+
+\section{Methodology}
+
+
+
+\subsection{Training Procedure and Implementation Details}
+
+Post-processing heuristics are used to correct common prediction errors. These rules operate on the model’s confidence scores and tag sequences:
+
+\begin{itemize}
+    \item Low-confidence "O" between entity tags may be converted to "I-PERSON".
+    \item "I-PERSON" following "O" may be reclassified as "B-PERSON".
+    \item Single-token "I-PERSON" spans are corrected to "B-PERSON".
+\end{itemize}
+
+This step improves boundary alignment and reduces entity fragmentation.
+
+The training pipeline implements a sophisticated multi-stage approach that balances efficiency with performance optimization. The system supports both simplified and complex model variants, with automatic configuration based on experimental requirements.
+
+\subsubsection{Model Initialization and Configuration}
+
+The training system employs a dynamic configuration management approach that automatically adapts to different dataset schemas and experimental settings:
+
+\begin{itemize}
+    \item \textbf{Automatic Schema Detection}: The system automatically detects whether the dataset includes TITLE labels using the \texttt{detect\_label\_schema()} function
+    \item \textbf{Dynamic Label Configuration}: The \texttt{get\_label\_config()} function generates appropriate label mappings, supporting both 3-label (O, B-PERSON, I-PERSON) and 5-label (O, B-PERSON, I-PERSON, B-TITLE, I-TITLE) schemes
+    \item \textbf{Model Variant Selection}: Based on the \texttt{use\_simplified\_model} flag, the system initializes either the streamlined \texttt{SimplifiedRobertaCRFForTokenClassification} (optimized for rapid hyperparameter exploration) or the complex \texttt{RobertaCRFForTokenClassification} architecture (used for final training and deployment)
+\end{itemize}
+
+\subsubsection{Data Augmentation Pipeline}
+
+The training process incorporates intelligent data augmentation through person-name substitution:
+
+\begin{itemize}
+    \item \textbf{Name Dictionary Construction}: Names are extracted from training corpora or loaded from external dictionaries stored in \texttt{names\_dictionary.json}
+    \item \textbf{Context-Preserving Substitution}: Original person names are replaced with alternatives while maintaining sentence structure and BIO tag consistency
+    \item \textbf{Configurable Augmentation}: The augmentation factor (default 0.3) controls the proportion of augmented examples, with the option to skip augmentation for faster optimization trials
+\end{itemize}
+
+\subsubsection{Loss Function Optimization}
+
+The complex model variant employs a sophisticated multi-component loss function that addresses different aspects of NER performance:
+
+\begin{equation}
+\mathcal{L}_{total} = \lambda_{CRF} \cdot \mathcal{L}_{CRF} + \lambda_{focal} \cdot \mathcal{L}_{focal} + \lambda_{dice} \cdot \mathcal{L}_{dice}
+\end{equation}
+
+Where each component targets specific challenges:
+\begin{itemize}
+    \item \textbf{CRF Loss}: Ensures valid BIO tag transitions and sequence-level consistency
+    \item \textbf{Focal Loss}: Addresses class imbalance with configurable $\alpha$ and $\gamma$ parameters, applying enhanced weights to PERSON entities
+    \item \textbf{Enhanced Boundary Dice Loss}: Emphasizes critical entity boundaries through weighted importance of B-PERSON tags, entity endpoints, and contextual tokens
+\end{itemize}
+
+\subsubsection{Training Configuration and Optimization}
+
+The training system implements adaptive configuration based on model complexity and experimental requirements:
+
+\begin{itemize}
+    \item \textbf{Adaptive Batch Sizing}: Gradient accumulation (a technique that simulates larger batch sizes by accumulating gradients over multiple smaller batches before updating model parameters) is automatically adjusted based on batch size to maintain consistent effective batch sizes
+    \item \textbf{Learning Rate Scheduling}: Support for linear, cosine, and cosine-with-restarts schedulers with configurable warmup ratios
+    \item \textbf{Early Stopping}: Patience-based early stopping prevents overfitting while monitoring entity-level F1 scores
+    \item \textbf{Mixed Precision Training}: FP16 training (using 16-bit floating point numbers instead of standard 32-bit) reduces memory requirements and accelerates training on compatible hardware
+\end{itemize}
+\subsubsection{Two-Phase Hyperparameter Optimization Results}
+
+The hyperparameter optimization employs a sophisticated two-phase strategy that systematically explores the parameter space while maintaining computational efficiency. **The simplified model variant is specifically utilized for this optimization process to enable rapid experimentation and parameter exploration.** The search space encompasses 16 key parameters across model architecture, loss functions, and training configuration.
+
+\textbf{Phase 1 Parameter Ranges (Broad Exploration):}
+\begin{itemize}
+    \item \textbf{Architecture Parameters}: Number of attention heads (2-8), max relative position (3-10), dropout (0.1-0.4)
+    \item \textbf{Loss Weights}: CRF weight (0.3-0.9), focal weight (0.05-0.4), dice weight (0.05-0.5)
+    \item \textbf{Focal Loss Parameters}: Alpha (0.1-0.5), gamma (1.0-3.0), person weight (2.0-8.0)
+    \item \textbf{Boundary Weights}: B-weight (1.5-5.0), I-end weight (1.0-4.0), context weight (0.5-3.0)
+    \item \textbf{Training Parameters}: Learning rate (5e-6 to 8e-5), weight decay (0.001-0.02, a regularization technique that prevents overfitting by penalizing large parameter values), warmup ratio (0.02-0.2, the proportion of training steps used to gradually increase the learning rate from zero)
+\end{itemize}
+
+\textbf{Phase 2 Focused Refinement:}
+Following statistical analysis of Phase 1 results, the top 30\% of trials inform focused parameter ranges for Phase 2. The system automatically generates narrowed ranges using mean ± 1.5×standard deviation, with minimum width constraints to ensure adequate exploration.
+
+\textbf{Optimization Results:}
+The final optimized configuration achieved through this two-phase approach demonstrates significant improvements over baseline parameters. The optimization process identified critical parameter interactions, particularly the importance of balanced loss component weighting and appropriate boundary emphasis in the enhanced dice loss.
+\subsubsection{Fixed Training Parameters}
+
+Several training parameters were kept constant across all experiments to ensure reproducibility and focus optimization efforts on the most impactful hyperparameters:
+
+\begin{itemize}
+    \item \textbf{Training Epochs}: Fixed at 15 for complex models and 8-10 for simplified models during hyperparameter optimization (simplified models use fewer epochs specifically to accelerate the search process), with early stopping patience of 3 epochs
+    \item \textbf{Optimizer}: AdamW with default parameters, selected for its strong performance on transformer-based models
+    \item \textbf{Label Smoothing}: Fixed at 0.1 to improve generalization and reduce overconfidence
+    \item \textbf{Mixed Precision}: FP16 training enabled to reduce memory usage and accelerate training    \item \textbf{Evaluation Strategy}: Epoch-based evaluation with entity-level F1 score as the primary optimization metric
+    \item \textbf{Random Seed}: Fixed across all experiments to ensure reproducible results
+\end{itemize}
+
+The hyperparameter search was constrained to a manageable scope due to computational limitations, focusing on parameters with the highest expected impact on model performance rather than exhaustive grid search.
+
+
+\subsection{Post-processing Heuristics}
+
+After decoding model predictions, a series of post-processing rules are applied to enhance sequence consistency and correct common tagging errors—especially those resulting from class imbalance and uncertainty in boundary positions. These heuristics aim to enforce valid BIO sequences and boost entity recognition quality:
+
+\begin{itemize}
+    \item \textbf{Filling Gaps Between Entities:} When a low-confidence \texttt{O} tag appears between two high-confidence entity tokens (e.g., \texttt{B-PERSON} and \texttt{I-PERSON}), it is replaced with \texttt{I-PERSON}. This helps recover split entities that the model failed to span continuously.
+
+    \item \textbf{Entity Re-initialization:} If an \texttt{I-PERSON} tag with low confidence appears after an \texttt{O}, it is corrected to \texttt{B-PERSON} to ensure a valid span start. This prevents invalid transitions like \texttt{O → I-PERSON} that break BIO format conventions.
+
+    \item \textbf{Noise Suppression:} A \texttt{B-PERSON} tag with very low confidence and surrounded by two \texttt{O} tags is downgraded to \texttt{O}. This rule filters out spurious entity predictions that are not contextually supported and are likely false positives.
+
+    \item \textbf{Isolated I-PERSON Correction:} If an \texttt{I-PERSON} token appears without a preceding \texttt{B-PERSON} in the same span, it is converted to \texttt{B-PERSON}. This ensures the entity is properly initialized, particularly in cases where \texttt{B-PERSON} was dropped or misclassified.
+
+\end{itemize}
+
+These rules, while heuristic in nature, consistently improved the precision-recall tradeoff during validation. They are lightweight, interpretable, and serve as an effective alternative to complex sequence-level inference methods.
+
+\subsection{Goal and Research Questions}
+
+The primary goal of this project is to develop a compact, task-specific Named Entity Recognition (NER) model capable of accurately identifying proper person names within web-based textual content. In contrast to general-purpose NER systems, which often misclassify occupational roles as person names, this model aims to distinguish true proper names from titles such as “manager” or “CEO” by introducing a dedicated label.
+
+This work is guided by the following research questions:
+
+\begin{itemize}
+  \item Can a task-specific model, trained solely for proper name recognition, achieve performance comparable to or exceeding that of state-of-the-art large general-purpose models?
+  \item Does the use of heuristics, such as introducing a distinct label for occupational titles, improve precision in differentiating between roles and actual person names?
+  \item How well can such a model generalize across formal and informal language found in various web-based contexts?
+\end{itemize}
+
+\subsection{Objects: Datasets and Labeling}
+
+To answer these questions, I assembled a diverse collection of datasets spanning both formal and informal web text. These include:
+
+\begin{itemize}
+  \item The CONLL-2003 dataset, a standard benchmark for NER tasks.
+  \item Custom web-scraped datasets collected from company websites, containing staff pages, biographies, and press releases.
+  \item Informal texts from social media posts, newsletters, and comment sections to simulate noisy or user-generated content.
+\end{itemize}
+
+All data was manually or semi-automatically annotated to follow a reduced label scheme, focusing exclusively on the detection of proper names (\texttt{PER}) and occupational roles (\texttt{TITLE}), while labeling all other tokens as \texttt{O}.
+
+\subsection{Data Collection Method}
+
+The supplementary datasets were obtained using a custom web scraping pipeline designed to extract textual content from business websites. Pages targeting executive profiles, company introductions, and contact sections were prioritized to collect contexts rich in named entities.
+
+Social media and informal text examples were sourced from publicly available corpora. All data was cleaned, normalized, and converted into token-label pairs suitable for training transformer-based NER models.
+
+\subsection{Variables and Labeling Schema}
+
+The evaluation focused on two primary dependent variables:
+
+\begin{itemize}
+  \item \textbf{F1-score for the \texttt{PER} tag}: This measures the model’s ability to correctly identify proper person names, balancing precision and recall.
+  \item \textbf{Execution time}: This includes both the time required to fine-tune the model and the inference time during prediction, relevant for assessing the practicality of deploying the model in real-time or large-scale applications.
+\end{itemize}
+
+The main independent variables were:
+
+\begin{itemize}
+  \item \textbf{Dataset source}: Comparison between training on formal datasets (e.g., CONLL-2003) and informal web-sourced datasets.
+  \item \textbf{Presence of the \texttt{TITLE} tag}: Whether the model included the additional label for occupational roles.
+  \item \textbf{Hyperparameters}: Learning rate, batch size, number of epochs, and other training configuration details explored via Optuna.
+\end{itemize}
+
+The annotation scheme was deliberately reduced in scope, focusing on two named entity classes:
+
+\begin{itemize}
+  \item \texttt{PER}   Proper person names only (e.g., “John Smith”, “Angela”).
+  \item \texttt{TITLE}   Occupational roles and titles (e.g., “CEO”, “President”, “Mr.”).
+\end{itemize}
+
+All other tokens were assigned the label \texttt{O}. This selective labeling was designed to enhance precision by reducing ambiguity, particularly for web-based content where roles and names often appear together.
+
+\subsection{Experimental Design and Analysis Framework}
+To evaluate the effectiveness of the proposed approach, I conducted a series of comparative experiments across multiple configurations of the fine-tuned model. Specifically, I analyzed:
+
+\begin{itemize}
+  \item \textbf{Impact of the \texttt{TITLE} tag}: I trained and evaluated two versions of the model, one that includes a dedicated label for occupational titles and one that does not. This comparison allows assessment of whether explicitly separating roles from person entities improves precision and reduces misclassifications.
+  \item \textbf{Cross-dataset generalization}: For each dataset used during training, I tested the model on its corresponding test split. This approach enabled measurement of dataset-specific generalization and performance consistency.
+  \item \textbf{Model size vs. performance}: As part of the goal to create a compact yet high-performing NER system, I recorded and compared the size of the trained model with its F1-score. This trade-off between model efficiency and accuracy is critical for deployment in resource-constrained or latency-sensitive environments.
+  \item \textbf{Comparison with state-of-the-art}: I compared the model’s F1-scores, particularly on the \texttt{PER} class, against benchmarks reported by general-purpose NER models such as RoBERTa, BERT, and in some cases, results from LLM-based approaches (e.g., GPT-NER).
+\end{itemize}
+
+To support these analyses, I generated:
+
+\begin{itemize}
+  \item \textbf{Tables} detailing per-dataset performance (precision, recall, F1) for both model versions (with and without the \texttt{TITLE} tag).
+  \item \textbf{Bar charts and line plots} visualizing performance trends across datasets and configurations.
+  \item \textbf{Scatter plots} comparing model size and inference speed against F1-score, to illustrate efficiency-performance trade-offs.
+\end{itemize}
+
+All results were computed using standard evaluation metrics, and all models were evaluated using the same test conditions to ensure fairness and reproducibility.  
+\\
+
+
+\section{Data Analysis}
+
+The comprehensive evaluation of the NER system was conducted across multiple datasets and configurations to assess performance, efficiency, and practical applicability. Due to the complexity of the hyperparameter optimization process and the computational constraints of this research, detailed quantitative results are stored in the evaluation results directory and can be accessed through the automated analysis scripts.
+
+The evaluation framework focused on entity-level performance metrics, particularly F1-score for PERSON entities, while also considering training efficiency and model deployment characteristics. The two-phase optimization approach successfully identified optimal hyperparameter configurations that balance accuracy with computational efficiency, demonstrating the effectiveness of the proposed methodology for specialized NER applications.
+
+
+
+		
+\newpage
+\section{\textbf{Future work}}
+
+This project presents a specialized Named Entity Recognition system designed to accurately identify proper person names using an enhanced RoBERTa-based architecture. While the current results are promising, several avenues remain open for further exploration and development.
+
+\subsection{Deeper Investigation of Contextual Signals}
+
+One limitation of this work is the relatively shallow exploration of linguistic and contextual cues beyond titles and surrounding tokens. Future studies could investigate deeper semantic and syntactic features, such as dependency parsing and coreference resolution, to further enhance entity disambiguation—especially in complex texts where named references may be unclear.
+
+\subsection{Modularization and Library Design}
+
+Currently, the model and all its components (custom loss functions, post-processing, data augmentation, etc.) are implemented in a project-specific structure. As future work, the codebase could be refactored into a modular, well-documented Python library or framework. This would enable anyone to easily adapt the model to different entity types or domains, and to plug in alternative components such as CRF variants or transformer backbones.
+
+\subsection{Training Efficiency and Scalability}
+
+One major constraint encountered during this project was the time and computational resources required to train the model. Due to these limitations, only a restricted number of configurations could be tested. Future work could explore methods to improve training efficiency, such as:
+
+\begin{itemize}
+    \item Using smaller, distilled models (e.g., DistilRoBERTa) as backbones.
+    \item Leveraging parameter-efficient fine-tuning techniques like LoRA or adapters.
+    \item Employing dataset subsampling or curriculum learning to prioritize informative examples.
+    \item Utilizing hardware accelerators or cloud services to parallelize experiments.
+\end{itemize}
+
+Additionally, exploring dynamic evaluation or continual learning approaches could reduce the need to retrain the model from scratch when updating or extending it with new data.
+
+\subsection{Real-World Integration and Feedback Loops}
+
+Although the system was motivated by a practical use case, extracting CEO names from company websites, it was not directly integrated into the original scraper. Future work could involve deploying the model as a web service or microservice and integrating it into the scraper pipeline. This would allow for real-time inference and could enable the collection of user feedback, which may then be used to improve the model in a semi-supervised or active learning loop.
+
+\subsection{Broader Evaluation and Generalization}
+
+The model was evaluated primarily on datasets derived from renowned datasets such as CONLL-2003 and social media text datasets. To better understand its generalizability, it should be tested on more diverse corpora, including multilingual and domain-specific datasets. This would help assess its robustness and reveal domain-specific weaknesses. Furthermore, benchmarking against more baselines and under multilingual settings could open further research directions.
+
+\section{\textbf{Conclusion}}
+
+This work presents a comprehensive approach to specialized Named Entity Recognition for proper name identification, introducing several key innovations that address limitations in general-purpose NER systems. The implemented solution successfully combines architectural efficiency with performance optimization through a sophisticated multi-stage approach.
+
+\subsection{Key Technical Contributions}
+
+The research contributes several novel technical components to the NER field:
+
+\begin{itemize}
+    \item \textbf{Hybrid Architecture Design}: The dual-model approach (simplified vs. complex) provides flexibility in balancing computational efficiency with performance requirements, enabling deployment in resource-constrained environments without sacrificing accuracy.
+    
+    \item \textbf{Dynamic Configuration System}: The automatic detection and adaptation to different labeling schemes (3-label vs. 5-label) ensures broad applicability across datasets while maintaining implementation consistency.
+    
+    \item \textbf{Multi-Component Loss Integration}: The sophisticated combination of CRF, focal, and enhanced boundary dice losses addresses multiple challenges simultaneously—sequence consistency, class imbalance, and boundary detection accuracy.
+    
+    \item \textbf{Two-Phase Optimization Strategy}: The systematic hyperparameter exploration approach maximizes performance discovery while maintaining computational efficiency through statistical analysis and focused search refinement.
+\end{itemize}
+
+\subsection{Practical Impact and Applications}
+
+The specialized focus on proper name recognition with explicit title distinction addresses real-world deployment challenges in business intelligence, content analysis, and information extraction pipelines. The system's ability to distinguish between occupational roles and person names provides practical value for applications requiring high precision in entity classification.
+
+The modular implementation architecture enables easy adaptation to different domains and datasets, while the comprehensive evaluation framework provides robust performance assessment across multiple metrics and experimental conditions.
+
+\subsection{Research Implications}
+
+This work demonstrates that task-specific NER models can achieve competitive performance compared to general-purpose systems while offering greater precision in specialized domains. The introduction of explicit title labeling provides a template for incorporating domain-specific entity categories that improve disambiguation without significantly increasing model complexity.
+
+The two-phase optimization approach offers a replicable methodology for efficient hyperparameter search in resource-constrained research environments, while the dynamic configuration system provides a foundation for building adaptable NLP systems.
+
+\section{\textbf{Summary}}
+\subsection{Threats to Validity}
+\subsection{Final Results}
+
+
+
+
+
+
+
+\newpage
+	
+%%%%% BIBLIOGRAPHY %%%%%
+\bibliographystyle{abbrv}
+\bibliography{reference}
+
+
+\end{document}

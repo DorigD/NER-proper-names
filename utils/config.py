@@ -16,10 +16,11 @@ TRAINING_RESULTS_PATH = os.path.join(LOGS_DIR, "training_results.json")
 # Model configuration
 MODEL_NAME = "roberta-base"
 MODEL_OUTPUT_DIR = os.path.join(MODELS_DIR, "roberta-finetuned-ner")
-LABELS = {"O": 0, "B-PERSON": 1, "I-PERSON": 2, "TITLE": 3}
 #LABELS = {"O": 0, "B-PERSON": 1, "I-PERSON": 2}
+LABELS = {"O": 0, "B-PERSON": 1, "I-PERSON": 2, "B-TITLE": 3, "I-TITLE": 4}
 NUM_LABELS = len(LABELS)
 ID2LABEL = {str(i): label for label, i in LABELS.items()}
+LABEL2ID = {label: i for label, i in LABELS.items()}
 PERSON_TAG_PATTERN = re.compile(r'(^|B-|I-)(per(son)?|PER)$', re.IGNORECASE)
 TITLES_array = {"Mr.", "Mrs.", "Miss", "Ms.", "Dr.", "Prof.", "Sir", "Madam",
           "President", "Chancellor", "Minister", "Mayor", "King", "Queen", "Pope", "Chief",

@@ -1,0 +1,16 @@
+{
+  "source_file": "c:\\Users\\Administrator\\Desktop\\tmp\\NER-proper-names\\data\\json\\result.json",
+  "model_name": "roberta-base",
+  "max_length": 128,
+  "include_title_tags": false,
+  "test_size": 0.1,
+  "val_size": 0.1,
+  "seed": 42,
+  "num_examples": 240,
+  "output_mapping": {
+    "O": 0,
+    "B-PERSON": 1,
+    "I-PERSON": 2
+  },
+  "created_at": "2025-06-09 03:08:05.855563"
+}

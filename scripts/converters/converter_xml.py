@@ -2,7 +2,8 @@ import json
 import os
 import sys
 import re
-from utils.config import LABELS, PERSON_TAG_PATTERN, TITLES, DATA_DIR
+from utils.config import PERSON_TAG_PATTERN, TITLES, DATA_DIR
+LABELS = {"O": 0, "B-PERSON": 1, "I-PERSON": 2, "TITLE": 3}
 
 def convert_xml_to_json(xml_file_path, json_file_path, replace=True):
     dataset = []

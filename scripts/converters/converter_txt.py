@@ -2,9 +2,9 @@ import json
 import os
 import sys
 import re
-from utils.config import LABELS, PERSON_TAG_PATTERN, TITLES
+from utils.config import PERSON_TAG_PATTERN, TITLES
 
-
+LABELS = {"O": 0, "B-PERSON": 1, "I-PERSON": 2, "TITLE": 3}
 def convert_txt_to_json(txt_file_path, json_file_path, replace=True):
     dataset = []
     current_sentence = {"tokens": [], "ner_tags": []}

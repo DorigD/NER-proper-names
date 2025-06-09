@@ -1,0 +1,2 @@
+model_name,dataset_name,model_size_mb,num_parameters,person_precision,person_recall,person_f1,overall_precision,overall_recall,overall_f1,avg_inference_time_per_token,total_inference_time,num_examples,num_tokens,device,timestamp
+roberta-finetuned-ner-NO-TILE-v3,Test Split,484.5286560058594,127016280,0.028731286859216696,0.10026385224274406,0.04466384579219559,0.028731286859216696,0.10026385224274406,0.04466384579219559,0.0016231932016860784,40.81032347679138,934,25142,cuda,2025-06-07T16:22:59.621732

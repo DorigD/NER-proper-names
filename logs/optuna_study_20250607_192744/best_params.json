@@ -1,0 +1,20 @@
+{
+  "num_attention_heads": 5,
+  "max_relative_position": 3,
+  "dropout": 0.15224353218459835,
+  "crf_weight": 0.5716967479563728,
+  "focal_weight": 0.31545861935332176,
+  "dice_weight": 0.32525634777320883,
+  "alpha": 0.39901100615136664,
+  "gamma": 1.4415607454730215,
+  "person_weight": 6.140799793531728,
+  "b_weight": 2.688843729749715,
+  "i_end_weight": 2.5747063153175436,
+  "context_weight": 1.518191597558458,
+  "confidence_threshold": 0.6248981854350606,
+  "learning_rate": 2.27249488138799e-05,
+  "weight_decay": 0.016964583001534323,
+  "batch_size": 8,
+  "warmup_ratio": 0.04393235125218273,
+  "lr_scheduler": "cosine"
+}

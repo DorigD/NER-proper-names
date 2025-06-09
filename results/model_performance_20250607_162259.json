@@ -1,0 +1,20 @@
+[
+  {
+    "model_name": "roberta-finetuned-ner-NO-TILE-v3",
+    "dataset_name": "Test Split",
+    "model_size_mb": 484.5286560058594,
+    "num_parameters": 127016280,
+    "person_precision": 0.028731286859216696,
+    "person_recall": 0.10026385224274406,
+    "person_f1": 0.04466384579219559,
+    "overall_precision": 0.028731286859216696,
+    "overall_recall": 0.10026385224274406,
+    "overall_f1": 0.04466384579219559,
+    "avg_inference_time_per_token": 0.0016231932016860784,
+    "total_inference_time": 40.81032347679138,
+    "num_examples": 934,
+    "num_tokens": 25142,
+    "device": "cuda",
+    "timestamp": "2025-06-07T16:22:59.621732"
+  }
+]

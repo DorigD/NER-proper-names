@@ -1,0 +1,1 @@
+{"eval_loss": 0.4012044668197632, "eval_person_f1": 0.9654266958424508, "eval_entity_f1": 0.8160466812545587, "eval_token_accuracy": 0.9964670951253429, "eval_runtime": 34.5162, "eval_samples_per_second": 43.429, "eval_steps_per_second": 5.447, "epoch": 7.0}
