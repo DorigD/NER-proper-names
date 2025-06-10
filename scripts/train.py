@@ -667,12 +667,21 @@ class RobertaCRFForTokenClassification(nn.Module):
         
         # Get config from the base model
         self.config = self.roberta.config
-        
-        # Add token classification specific attributes to config
+          # Add token classification specific attributes to config
         self.config.num_labels = num_labels
         self.config.id2label = ID2LABEL
         self.config.label2id = LABEL2ID
         self.config.problem_type = "token_classification"
+        
+        # Add custom model parameters to config for proper saving/loading
+        self.config.alpha = alpha
+        self.config.gamma = gamma
+        self.config.person_weight = person_weight
+        self.config.crf_weight = crf_weight
+        self.config.focal_weight = focal_weight
+        self.config.dice_weight = dice_weight
+        self.config.classifier_params = classifier_params or {}
+        self.config.dice_loss_params = dice_loss_params or {}
         
         # Default parameters
         classifier_params = classifier_params or {}
@@ -1436,11 +1445,77 @@ def main(config=None, test_mode=False, output_dir=None, dataset_path=DATASET_PAT
             test_results.update(postprocessing_results)
         except Exception as e:
             print(f"Error during post-processing evaluation: {str(e)}")
-            # Continue execution without crashing
-    elif use_simplified_model:
-        print("Skipping post-processing evaluation for simplified model")
-      # Save final model
+            # Continue execution without crashing    elif use_simplified_model:
+        print("Skipping post-processing evaluation for simplified model")      # Save final model
     trainer.save_model(model_output_dir)
+    
+    # Create and save a proper config.json for our custom model
+    # This is needed because our custom model doesn't inherit from PreTrainedModel
+    import json
+    
+    # Create custom config that includes all our model parameters
+    custom_config = {
+        # Base RoBERTa config
+        "architectures": ["RobertaCRFForTokenClassification"],  # Our custom architecture
+        "model_type": "roberta_crf",  # Custom model type
+        
+        # Copy important config from underlying RoBERTa model
+        "vocab_size": model.roberta.config.vocab_size,
+        "hidden_size": model.roberta.config.hidden_size,
+        "num_hidden_layers": model.roberta.config.num_hidden_layers,
+        "num_attention_heads": model.roberta.config.num_attention_heads,
+        "intermediate_size": model.roberta.config.intermediate_size,
+        "max_position_embeddings": model.roberta.config.max_position_embeddings,
+        "type_vocab_size": model.roberta.config.type_vocab_size,
+        "attention_probs_dropout_prob": model.roberta.config.attention_probs_dropout_prob,
+        "hidden_dropout_prob": model.roberta.config.hidden_dropout_prob,
+        "hidden_act": model.roberta.config.hidden_act,
+        "layer_norm_eps": model.roberta.config.layer_norm_eps,
+        "initializer_range": model.roberta.config.initializer_range,
+        "pad_token_id": model.roberta.config.pad_token_id,
+        "bos_token_id": model.roberta.config.bos_token_id,
+        "eos_token_id": model.roberta.config.eos_token_id,
+        
+        # Token classification specific config
+        "num_labels": NUM_LABELS,
+        "id2label": ID2LABEL,
+        "label2id": LABEL2ID,
+        "problem_type": "token_classification",
+        
+        # Our custom model parameters
+        "alpha": config["alpha"],
+        "gamma": config["gamma"],
+        "person_weight": config["person_weight"],
+        "crf_weight": config["crf_weight"],
+        "focal_weight": config["focal_weight"],
+        "dice_weight": config["dice_weight"],
+        
+        # Classifier parameters
+        "classifier_params": {
+            "num_attention_heads": config["num_attention_heads"],
+            "max_relative_position": config["max_relative_position"],
+            "dropout": config["dropout"]
+        },
+        
+        # Dice loss parameters
+        "dice_loss_params": {
+            "smooth": config["dice_smooth"],
+            "b_weight": config["b_weight"],
+            "i_end_weight": config["i_end_weight"],
+            "context_weight": config["context_weight"]
+        },
+        
+        # Other important fields
+        "torch_dtype": "float32",
+        "transformers_version": "4.36.0",
+        "use_cache": True
+    }
+    
+    # Save the custom config
+    config_path = os.path.join(model_output_dir, "config.json")
+    with open(config_path, 'w') as f:
+        json.dump(custom_config, f, indent=2)
+    print(f"Saved custom config to {config_path}")
     
     # Save label configuration for consistency during inference
     save_label_config(model_output_dir, include_title_tags)

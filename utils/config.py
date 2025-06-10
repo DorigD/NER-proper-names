@@ -15,7 +15,7 @@ TRAINING_RESULTS_PATH = os.path.join(LOGS_DIR, "training_results.json")
 
 # Model configuration
 MODEL_NAME = "roberta-base"
-MODEL_OUTPUT_DIR = os.path.join(MODELS_DIR, "roberta-finetuned-ner")
+MODEL_OUTPUT_DIR = os.path.join(MODELS_DIR)
 #LABELS = {"O": 0, "B-PERSON": 1, "I-PERSON": 2}
 LABELS = {"O": 0, "B-PERSON": 1, "I-PERSON": 2, "B-TITLE": 3, "I-TITLE": 4}
 NUM_LABELS = len(LABELS)

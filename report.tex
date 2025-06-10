@@ -105,7 +105,7 @@ The implemented NER system employs a modular architecture built around the Huggi
 
 \subsection{Dynamic Label Configuration System}
 
-A key innovation in this implementation is the dynamic label configuration system that automatically detects and adapts to different labeling schemes. The system implements a \texttt{get\_label\_config()} function that determines whether to include TITLE tags based on dataset characteristics or explicit configuration. This enables training on datasets with varying annotation schemas:
+A key feature in this implementation is the dynamic label configuration system that automatically detects and adapts to different labeling schemes. The system implements a \texttt{get\_label\_config()} function that determines whether to include TITLE tags based on dataset characteristics or explicit configuration. This enables training on datasets with varying annotation schemas:
 
 \begin{itemize}
     \item \textbf{Standard NER Schema}: Uses conventional B-PERSON, I-PERSON, and O labels for traditional person entity recognition.
@@ -134,18 +134,18 @@ The simplified variant (\texttt{SimplifiedRobertaCRFForTokenClassification}) com
 The complex variant (\texttt{RobertaCRFForTokenClassification}) incorporates additional architectural components for improved performance on challenging datasets:
 
 \begin{itemize}
-    \item \textbf{Cross-Attention Span Classifier}: Implements multi-head attention mechanisms (parallel attention computations that allow the model to focus on different types of relationships simultaneously) to capture long-range dependencies within entity spans.
+    \item \textbf{Cross-Attention Span Classifier}: Implements multi-head attention mechanisms (parallel attention computations that allow the model to focus on different types of relationships simultaneously) to capture long-range dependencies within entity spans\cite{Tan_Qiu_Chen_Wang_Huang_2020}.
     \item \textbf{Relative Position Embeddings}: Enhanced attention computation with relative positional encodings for better entity boundary detection.
     \item \textbf{Parameterized Architecture}: Configurable attention heads, relative position windows, and dropout rates for fine-grained optimization.
 \end{itemize}
 
 \subsection{Multi-Component Loss Function Design}
 
-The system implements a sophisticated loss combination strategy addressing multiple aspects of NER performance:
+The system implements a loss combination strategy addressing multiple aspects of NER performance:
 
 \subsubsection{Focal Loss for Class Imbalance}
 
-Focal loss is a specialized loss function designed to address class imbalance problems in classification tasks. Unlike standard cross-entropy loss, focal loss reduces the loss contribution from easily classified examples and focuses learning on hard, misclassified examples. This is particularly important in NER where non-entity tokens (O tags) vastly outnumber entity tokens, creating a severe class imbalance that can bias models toward predicting non-entities.
+Focal loss is a specialized loss function designed to address class imbalance problems in classification tasks\cite{9624339}. Unlike standard cross-entropy loss, focal loss reduces the loss contribution from easily classified examples and focuses learning on hard, misclassified examples. This is particularly important in NER where non-entity tokens (O tags) vastly outnumber entity tokens, creating a severe class imbalance that can bias models toward predicting non-entities.
 
 Implemented focal loss with parameterized class weights to address the inherent imbalance in NER datasets where entity tokens are significantly outnumbered by non-entity tokens:
 
@@ -159,9 +159,9 @@ The implementation includes specific weighting for PERSON entities (\texttt{pers
 
 \subsubsection{Enhanced Boundary Dice Loss}
 
-Dice loss, originally developed for image segmentation, measures the overlap between predicted and true entity spans. Unlike token-level losses that treat each position independently, Dice loss considers the entire entity span as a unit, making it particularly suitable for sequence labeling tasks where entity boundaries are crucial.
+Dice loss measures the overlap between predicted and true entity spans.\cite{Li2019DiceLF} Unlike token-level losses that treat each position independently, Dice loss considers the entire entity span as a unit, making it particularly suitable for sequence labelling tasks where entity boundaries are crucial.
 
-A novel boundary-weighted Dice loss implementation that emphasizes critical positions in entity spans:
+A boundary-weighted Dice loss implementation that emphasizes critical positions in entity spans:
 
 \begin{itemize}
     \item \textbf{B-weight}: Enhanced importance for entity beginning tokens
@@ -173,9 +173,9 @@ This approach addresses common boundary detection errors that plague sequence la
 
 \subsubsection{CRF Loss Integration}
 
-Conditional Random Fields (CRF) are probabilistic models that consider the sequence structure in labeling tasks. Unlike independent token classification, CRFs model the dependencies between adjacent labels, ensuring that label transitions follow valid patterns. For example, in BIO tagging, a CRF prevents invalid transitions like O (Outside) directly to I-PERSON (Inside-Person), which violates the BIO constraint that Inside tags must follow Begin tags.
+Conditional Random Fields (CRF) are probabilistic models that consider the sequence structure in labeling tasks. Unlike independent token classification, CRFs model the dependencies between adjacent labels, ensuring that label transitions follow valid patterns.
 
-The CRF component provides structured prediction capabilities, ensuring valid tag transitions and improving sequence-level consistency. The CRF weight parameter allows balancing between token-level and sequence-level optimization objectives.
+The CRF component provides structured prediction capabilities, ensuring valid tag transitions and improving sequence-level consistency. The CRF weight parameter allows balancing between token-level and sequence-level optimization objectives \cite{PATIL20201181}.
 
 \subsection{Advanced Training Features}
 
@@ -207,7 +207,7 @@ A comprehensive post-processing system applies confidence-based heuristics to im
 
 The hyperparameter optimization system implements a sophisticated two-phase strategy using Optuna, an automatic hyperparameter optimization framework that employs advanced sampling algorithms like Tree-structured Parzen Estimator (TPE), a Bayesian optimization method that models the probability distribution of hyperparameters leading to good performance, to efficiently explore parameter spaces. Optuna's pruning capabilities allow early termination of unpromising trials, significantly reducing computational overhead during optimization.
 
-**The simplified model architecture is specifically employed throughout this optimization process to enable efficient parameter exploration while maintaining representative performance characteristics.**
+The simplified model architecture is specifically employed throughout this optimization process to enable efficient parameter exploration while maintaining representative performance characteristics.
 
 \subsubsection{Phase 1: Broad Exploration}
 \begin{itemize}
@@ -250,9 +250,7 @@ However, significant limitations were observed:
 
 This approach was ultimately abandoned in favor of the current system, which addresses class imbalance through sophisticated multi-component loss functions and data augmentation strategies that proved more effective for balanced learning and entity segmentation.
 
-\section{Methodology}
-
-
+\section{Approach}
 
 \subsection{Training Procedure and Implementation Details}
 
@@ -315,7 +313,7 @@ The training system implements adaptive configuration based on model complexity 
 \end{itemize}
 \subsubsection{Two-Phase Hyperparameter Optimization Results}
 
-The hyperparameter optimization employs a sophisticated two-phase strategy that systematically explores the parameter space while maintaining computational efficiency. **The simplified model variant is specifically utilized for this optimization process to enable rapid experimentation and parameter exploration.** The search space encompasses 16 key parameters across model architecture, loss functions, and training configuration.
+The hyperparameter optimization employs a sophisticated two-phase strategy that systematically explores the parameter space while maintaining computational efficiency. The simplified model variant is specifically utilized for this optimization process to enable rapid experimentation and parameter exploration. The search space encompasses 16 key parameters across model architecture, loss functions, and training configuration.
 
 \textbf{Phase 1 Parameter Ranges (Broad Exploration):}
 \begin{itemize}
@@ -361,7 +359,7 @@ After decoding model predictions, a series of post-processing rules are applied 
 
 \end{itemize}
 
-These rules, while heuristic in nature, consistently improved the precision-recall tradeoff during validation. They are lightweight, interpretable, and serve as an effective alternative to complex sequence-level inference methods.
+These rules are lightweight, interpretable, and serve as an alternative to complex sequence-level inference methods.
 
 \subsection{Goal and Research Questions}
 
@@ -484,35 +482,6 @@ Although the system was motivated by a practical use case, extracting CEO names 
 
 The model was evaluated primarily on datasets derived from renowned datasets such as CONLL-2003 and social media text datasets. To better understand its generalizability, it should be tested on more diverse corpora, including multilingual and domain-specific datasets. This would help assess its robustness and reveal domain-specific weaknesses. Furthermore, benchmarking against more baselines and under multilingual settings could open further research directions.
 
-\section{\textbf{Conclusion}}
-
-This work presents a comprehensive approach to specialized Named Entity Recognition for proper name identification, introducing several key innovations that address limitations in general-purpose NER systems. The implemented solution successfully combines architectural efficiency with performance optimization through a sophisticated multi-stage approach.
-
-\subsection{Key Technical Contributions}
-
-The research contributes several novel technical components to the NER field:
-
-\begin{itemize}
-    \item \textbf{Hybrid Architecture Design}: The dual-model approach (simplified vs. complex) provides flexibility in balancing computational efficiency with performance requirements, enabling deployment in resource-constrained environments without sacrificing accuracy.
-    
-    \item \textbf{Dynamic Configuration System}: The automatic detection and adaptation to different labeling schemes (3-label vs. 5-label) ensures broad applicability across datasets while maintaining implementation consistency.
-    
-    \item \textbf{Multi-Component Loss Integration}: The sophisticated combination of CRF, focal, and enhanced boundary dice losses addresses multiple challenges simultaneously—sequence consistency, class imbalance, and boundary detection accuracy.
-    
-    \item \textbf{Two-Phase Optimization Strategy}: The systematic hyperparameter exploration approach maximizes performance discovery while maintaining computational efficiency through statistical analysis and focused search refinement.
-\end{itemize}
-
-\subsection{Practical Impact and Applications}
-
-The specialized focus on proper name recognition with explicit title distinction addresses real-world deployment challenges in business intelligence, content analysis, and information extraction pipelines. The system's ability to distinguish between occupational roles and person names provides practical value for applications requiring high precision in entity classification.
-
-The modular implementation architecture enables easy adaptation to different domains and datasets, while the comprehensive evaluation framework provides robust performance assessment across multiple metrics and experimental conditions.
-
-\subsection{Research Implications}
-
-This work demonstrates that task-specific NER models can achieve competitive performance compared to general-purpose systems while offering greater precision in specialized domains. The introduction of explicit title labeling provides a template for incorporating domain-specific entity categories that improve disambiguation without significantly increasing model complexity.
-
-The two-phase optimization approach offers a replicable methodology for efficient hyperparameter search in resource-constrained research environments, while the dynamic configuration system provides a foundation for building adaptable NLP systems.
 
 \section{\textbf{Summary}}
 \subsection{Threats to Validity}

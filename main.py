@@ -38,6 +38,7 @@ Features:
 - Support for both TITLE and NO-TITLE datasets
 - Integration with Optuna hyperparameter optimization results
 - Flexible model selection (simplified vs complex)
+- Consecutive training mode for incremental learning across datasets
 - Comprehensive error handling and logging
 - Dynamic label configuration management
 
@@ -74,6 +75,9 @@ TEST_MODE = False
 
 # Include TITLE tags: True to include B-TITLE/I-TITLE tags, False for PERSON-only NER
 INCLUDE_TITLE_TAGS = False
+
+# Training mode: True for consecutive training (each dataset enriches previous), False for independent models
+CONSECUTIVE_TRAINING = True
 
 # ============================================================================
 
@@ -125,10 +129,10 @@ def validate_environment(study_timestamp):
     
     return issues
 
-def process_and_train_dataset(raw_data_dir, dataset_name, study_timestamp, use_simplified_model, epochs, include_title_tags):
-    """Process raw data and train model for a specific dataset"""
+def process_and_train_dataset_consecutive(raw_data_dir, dataset_name, study_timestamp, use_simplified_model, epochs, include_title_tags, current_model_name="roberta-base", starting_version=1):
+    """Process raw data and train model consecutively for each dataset (incremental learning)"""
     print(f"\n{'='*60}")
-    print(f"🔄 Processing dataset: {dataset_name}")
+    print(f"🔄 Processing dataset: {dataset_name} (Consecutive Training)")
     print(f"📁 Source directory: {raw_data_dir}")
     print(f"{'='*60}")
     
@@ -142,16 +146,28 @@ def process_and_train_dataset(raw_data_dir, dataset_name, study_timestamp, use_s
         config.pop("skip_postprocessing_eval", None)
         config.pop("skip_augmentation", None)
     
-    version = 1  # Start from version 1 for trained models
+    # Determine model suffix for consistent naming
+    model_suffix = "TITLE" if include_title_tags else "NO-TITLE"
     
-    for file in os.listdir(raw_data_dir):
-        if not file.endswith(('.txt', '.json')):  # Skip non-data files
-            continue
-            
+    # Use passed parameters for consecutive training across datasets
+    version = starting_version
+      # Get sorted list of files for consistent processing order
+    files = sorted([f for f in os.listdir(raw_data_dir) if os.path.isfile(os.path.join(raw_data_dir, f))])
+    
+    if not files:
+        print(f"❌ No files found in {raw_data_dir}")
+        return
+    
+    print(f"📋 Found {len(files)} files to process consecutively:")
+    for i, file in enumerate(files, 1):
+        print(f"   {i}. {file}")
+    print()
+    
+    for i, file in enumerate(files):
         input_file = os.path.join(raw_data_dir, file)
         dataset_id = file.split('.')[0]
         
-        print(f"\n📄 Processing file: {file}")
+        print(f"\n📄 Processing file {i+1}/{len(files)}: {file}")
         print(f"🔄 Converting to NER format...")
         
         # Convert file to NER format
@@ -161,9 +177,7 @@ def process_and_train_dataset(raw_data_dir, dataset_name, study_timestamp, use_s
         if not os.path.exists(result_json_path):
             print(f"❌ Conversion failed for {file}, skipping...")
             continue
-          # Determine if we should include title tags (use the flag parameter)
-        model_suffix = "TITLE" if include_title_tags else "NO-TITLE"
-        
+          
         # Create dataset output directory
         dataset_output_dir = os.path.join(DATA_DIR, "ds", model_suffix, dataset_id)
         
@@ -186,26 +200,146 @@ def process_and_train_dataset(raw_data_dir, dataset_name, study_timestamp, use_s
             print(f"❌ Dataset creation failed for {dataset_id}, skipping training...")
             continue
         
-        # Set up model paths
-        model_name = "roberta-base"  # Always start from base model
+        # Set up model paths for consecutive training
         output_dir = os.path.join(MODELS_DIR, f"roberta-finetuned-ner-{model_suffix}-v{version}")
-          # Save label configuration for this model
-        save_label_config(output_dir, include_title_tags)
         
-        print(f"\n🚀 Starting model training...")
-        print(f"📊 Dataset: {training_dataset_path}")  # Updated to show correct path
+        # Display training information
+        print(f"\n🚀 Starting consecutive training (iteration {i+1}/{len(files)})...")
+        print(f"📊 Dataset: {training_dataset_path}")
         print(f"🤖 Model type: {'Complex' if not use_simplified_model else 'Simplified'}")
         print(f"🏷️  Include TITLE tags: {include_title_tags}")
+        print(f"🔗 Base model: {current_model_name}")
         print(f"💾 Output directory: {output_dir}")
         
+        # Save label configuration for this model
+        save_label_config(output_dir, include_title_tags)        
         try:
-            # Train the model using the standardized dataset path
+            # Train the model using the current model as base (consecutive training)
             results = train_model(
                 config=config,
                 test_mode=False,
                 output_dir=output_dir,
-                dataset_path=training_dataset_path,  # Use the standardized path
-                model_name=model_name,
+                dataset_path=training_dataset_path,
+                model_name=current_model_name,  # Use current model (base or previous trained)
+                use_simplified_model=use_simplified_model,
+                include_title_tags=include_title_tags
+            )
+            
+            print(f"✅ Training completed successfully!")
+            if results and isinstance(results, dict):
+                person_f1 = results.get("person_f1", results.get("eval_person_f1", "N/A"))
+                print(f"📈 Person F1 Score: {person_f1}")
+              # Update current_model_name for next iteration (consecutive training)
+            current_model_name = output_dir
+            version += 1
+            
+            print(f"🔗 Next model will use: {current_model_name}")
+            
+        except Exception as e:
+            print(f"❌ Training failed for {dataset_id}: {str(e)}")
+            print(f"⚠️  Consecutive training chain broken. Subsequent models will start from roberta-base.")
+            # Reset to base model if training fails to avoid using corrupted model
+            current_model_name = "roberta-base"
+            continue
+    
+    print(f"\n✅ Completed consecutive processing of {dataset_name} dataset")
+    print(f"🔗 Final model: {current_model_name if current_model_name != 'roberta-base' else 'No models trained successfully'}")
+    
+    # Return the final model name and next version for chaining across datasets
+    return current_model_name, version
+
+def process_and_train_dataset_independent(raw_data_dir, dataset_name, study_timestamp, use_simplified_model, epochs, include_title_tags, starting_version=1):
+    """Process raw data and train independent models for each dataset (original behavior)"""
+    print(f"\n{'='*60}")
+    print(f"🔄 Processing dataset: {dataset_name} (Independent Training)")
+    print(f"📁 Source directory: {raw_data_dir}")
+    print(f"{'='*60}")
+    
+    # Load optimized hyperparameters
+    config = load_best_hyperparameters(study_timestamp)
+    
+    # Override config for final training
+    if config:
+        config["epochs"] = epochs
+        config.pop("skip_postprocessing_eval", None)
+        config.pop("skip_augmentation", None)
+    
+    # Determine model suffix for consistent naming
+    model_suffix = "TITLE" if include_title_tags else "NO-TITLE"
+    version = starting_version  # Use passed starting version for continuity across datasets
+    
+    # Get sorted list of files for consistent processing order
+    files = sorted([f for f in os.listdir(raw_data_dir) if os.path.isfile(os.path.join(raw_data_dir, f))])
+    
+    if not files:
+        print(f"❌ No files found in {raw_data_dir}")
+        return
+    
+    print(f"📋 Found {len(files)} files to process independently:")
+    for i, file in enumerate(files, 1):
+        print(f"   {i}. {file}")
+    print()
+    
+    for i, file in enumerate(files):
+        input_file = os.path.join(raw_data_dir, file)
+        dataset_id = file.split('.')[0]
+        
+        print(f"\n📄 Processing file {i+1}/{len(files)}: {file}")
+        print(f"🔄 Converting to NER format...")
+        
+        # Convert file to NER format
+        convert_file(input_file)
+        
+        # Check if conversion was successful
+        result_json_path = os.path.join(DATA_DIR, "json", "result.json")
+        if not os.path.exists(result_json_path):
+            print(f"❌ Conversion failed for {file}, skipping...")
+            continue
+        
+        # Create dataset output directory
+        dataset_output_dir = os.path.join(DATA_DIR, "ds", model_suffix, dataset_id)
+        
+        print(f"🏗️  Creating NER dataset with{'out' if not include_title_tags else ''} TITLE tags...")
+        
+        # Create NER dataset
+        create_ner_dataset(
+            file_path=result_json_path,
+            output_dir=None,
+            include_title_tags=include_title_tags,
+            save_test_separately=True,
+            test_output_dir=dataset_output_dir
+        )
+        
+        # Training dataset path
+        training_dataset_path = os.path.join(DATA_DIR, "tokenized_train")
+        
+        # Verify dataset was created
+        if not os.path.exists(training_dataset_path):
+            print(f"❌ Dataset creation failed for {dataset_id}, skipping training...")
+            continue
+        
+        # Set up model paths for independent training (always start from roberta-base)
+        output_dir = os.path.join(MODELS_DIR, f"roberta-finetuned-ner-{model_suffix}-v{version}")
+        
+        # Display training information
+        print(f"\n🚀 Starting independent training (model {i+1}/{len(files)})...")
+        print(f"📊 Dataset: {training_dataset_path}")
+        print(f"🤖 Model type: {'Complex' if not use_simplified_model else 'Simplified'}")
+        print(f"🏷️  Include TITLE tags: {include_title_tags}")
+        print(f"🔗 Base model: roberta-base")
+        print(f"💾 Output directory: {output_dir}")
+        
+        # Save label configuration for this model
+        save_label_config(output_dir, include_title_tags)
+        
+        try:
+            # Train independent model (always from roberta-base)
+            results = train_model(
+                config=config,
+                test_mode=False,
+                output_dir=output_dir,
+                dataset_path=training_dataset_path,
+                model_name="roberta-base",  # Always start from base
                 use_simplified_model=use_simplified_model,
                 include_title_tags=include_title_tags
             )
@@ -221,24 +355,49 @@ def process_and_train_dataset(raw_data_dir, dataset_name, study_timestamp, use_s
             print(f"❌ Training failed for {dataset_id}: {str(e)}")
             continue
     
-    print(f"\n✅ Completed processing {dataset_name} dataset")
+    print(f"\n✅ Completed independent processing of {dataset_name} dataset")
+    
+    # Return next version for continuity across datasets
+    return version
+
+def process_and_train_dataset(raw_data_dir, dataset_name, study_timestamp, use_simplified_model, epochs, include_title_tags, consecutive=True, current_model_name="roberta-base", starting_version=1):
+    """
+    Wrapper function that chooses between consecutive and independent training modes.
+    
+    Args:
+        consecutive: True for consecutive training (incremental), False for independent models
+        current_model_name: Current model name for consecutive training
+        starting_version: Starting version number for this dataset
+        
+    Returns:
+        For consecutive: (final_model_name, next_version)
+        For independent: next_version
+    """
+    if consecutive:
+        return process_and_train_dataset_consecutive(raw_data_dir, dataset_name, study_timestamp, use_simplified_model, epochs, include_title_tags, current_model_name, starting_version)
+    else:
+        next_version = process_and_train_dataset_independent(raw_data_dir, dataset_name, study_timestamp, use_simplified_model, epochs, include_title_tags, starting_version)
+        return "roberta-base", next_version  # Return consistent format
 
 def run_full_pipeline():
     """Run the complete data processing and training pipeline"""
     print("🚀 Starting NER Training Pipeline")
     print("=" * 60)
-      # Apply test mode adjustment
+    
+    # Apply test mode adjustment
     epochs = 3 if TEST_MODE else TRAINING_EPOCHS
     
     print(f"📋 Configuration:")
     print(f"   • Optuna Study: {OPTUNA_STUDY_TIMESTAMP}")
     print(f"   • Model Type: {'Complex' if not USE_SIMPLIFIED_MODEL else 'Simplified'}")
+    print(f"   • Training Mode: {'Consecutive (Incremental)' if CONSECUTIVE_TRAINING else 'Independent Models'}")
     print(f"   • Training Epochs: {epochs}")
     print(f"   • Include TITLE tags: {INCLUDE_TITLE_TAGS}")
     if TEST_MODE:
         print(f"   • TEST MODE: Enabled (reduced epochs)")
     print("=" * 60)
-      # Validate environment
+    
+    # Validate environment
     print("🔍 Validating environment...")
     env_issues = validate_environment(OPTUNA_STUDY_TIMESTAMP)
     if env_issues:
@@ -246,21 +405,33 @@ def run_full_pipeline():
         for issue in env_issues:
             print(f"   • {issue}")
         print("\n💡 Please ensure all required files and directories are present before running the pipeline.")
-        return
-    
-    print("✅ Environment validation passed")
-    
+        return    print("✅ Environment validation passed")
     # Validate configuration consistency
     validate_configuration_consistency()
-      # Process Social dataset (typically without TITLE tags)
+    
+    # Initialize tracking variables for consecutive training across datasets
+    current_model_name = "roberta-base"
+    current_version = 1
+    
+    # Process Social dataset (typically without TITLE tags)
     if os.path.exists(input_file_social) and os.listdir(input_file_social):
-        process_and_train_dataset(input_file_social, "Social", OPTUNA_STUDY_TIMESTAMP, USE_SIMPLIFIED_MODEL, epochs, INCLUDE_TITLE_TAGS)
+        final_model, next_version = process_and_train_dataset(
+            input_file_social, "Social", OPTUNA_STUDY_TIMESTAMP, USE_SIMPLIFIED_MODEL, 
+            epochs, INCLUDE_TITLE_TAGS, CONSECUTIVE_TRAINING, current_model_name, current_version
+        )
+        # Update tracking variables for next dataset
+        if CONSECUTIVE_TRAINING:
+            current_model_name = final_model
+        current_version = next_version
     else:
         print(f"⚠️  Social dataset directory not found or empty: {input_file_social}")
     
     # Process General dataset (may include TITLE tags)
     if os.path.exists(input_file_general) and os.listdir(input_file_general):
-        process_and_train_dataset(input_file_general, "General", OPTUNA_STUDY_TIMESTAMP, USE_SIMPLIFIED_MODEL, epochs, INCLUDE_TITLE_TAGS)
+        final_model, next_version = process_and_train_dataset(
+            input_file_general, "General", OPTUNA_STUDY_TIMESTAMP, USE_SIMPLIFIED_MODEL, 
+            epochs, INCLUDE_TITLE_TAGS, CONSECUTIVE_TRAINING, current_model_name, current_version
+        )
     else:
         print(f"⚠️  General dataset directory not found or empty: {input_file_general}")
     
