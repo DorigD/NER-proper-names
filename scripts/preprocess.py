@@ -20,26 +20,6 @@ INPUT_TAGS = {"O": 0, "B-PERSON": 1, "I-PERSON": 2, "TITLE": 3}
 OUTPUT_TAGS_WITH_TITLE = {"O": 0, "B-PERSON": 1, "I-PERSON": 2, "B-TITLE": 3, "I-TITLE": 4}
 OUTPUT_TAGS_PERSON_ONLY = {"O": 0, "B-PERSON": 1, "I-PERSON": 2}
 
-# Log the actual tag mappings
-print("Preprocessing label configurations:")
-print(f"  INPUT_TAGS: {INPUT_TAGS}")
-print(f"  OUTPUT_TAGS_WITH_TITLE: {OUTPUT_TAGS_WITH_TITLE}")
-print(f"  OUTPUT_TAGS_PERSON_ONLY: {OUTPUT_TAGS_PERSON_ONLY}")
-
-# Validate consistency with utils.label_config
-try:
-    from utils.label_config import LABELS_WITH_TITLE, LABELS_WITHOUT_TITLE
-    
-    if OUTPUT_TAGS_WITH_TITLE != LABELS_WITH_TITLE:
-        print(f"⚠️ Warning: OUTPUT_TAGS_WITH_TITLE in preprocess.py ({OUTPUT_TAGS_WITH_TITLE}) " 
-              f"doesn't match LABELS_WITH_TITLE in label_config.py ({LABELS_WITH_TITLE})")
-    
-    if OUTPUT_TAGS_PERSON_ONLY != LABELS_WITHOUT_TITLE:
-        print(f"⚠️ Warning: OUTPUT_TAGS_PERSON_ONLY in preprocess.py ({OUTPUT_TAGS_PERSON_ONLY}) " 
-              f"doesn't match LABELS_WITHOUT_TITLE in label_config.py ({LABELS_WITHOUT_TITLE})")
-except ImportError:
-    print("⚠️ Warning: Could not import utils.label_config for validation")
-
 
 def convert_tags_to_bio(
     tags: List[int], 
