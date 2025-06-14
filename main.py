@@ -62,7 +62,7 @@ from scripts.train import main as train_model
 # ============================================================================
 
 # Optuna study timestamp (update this to match your study)
-OPTUNA_STUDY_TIMESTAMP = "20250607_192744"
+OPTUNA_STUDY_TIMESTAMP = None
 
 # Model type: False for complex model (best performance), True for simplified model (faster)
 USE_SIMPLIFIED_MODEL = False
