@@ -91,10 +91,10 @@ def load_best_hyperparameters(study_timestamp):
     try:
         with open(best_params_path, 'r') as f:
             config = json.load(f)
-        print(f"✅ Loaded optimized hyperparameters from: {best_params_path}")
+        print(f" Loaded optimized hyperparameters from: {best_params_path}")
         return config
     except FileNotFoundError:
-        print(f"⚠️  Best parameters file not found: {best_params_path}")
+        print(f"  Best parameters file not found: {best_params_path}")
         print("Using default hyperparameters...")
         return None
 
@@ -132,8 +132,8 @@ def validate_environment(study_timestamp):
 def process_and_train_dataset_consecutive(raw_data_dir, dataset_name, study_timestamp, use_simplified_model, epochs, include_title_tags, current_model_name="roberta-base", starting_version=1):
     """Process raw data and train model consecutively for each dataset (incremental learning)"""
     print(f"\n{'='*60}")
-    print(f"🔄 Processing dataset: {dataset_name} (Consecutive Training)")
-    print(f"📁 Source directory: {raw_data_dir}")
+    print(f" Processing dataset: {dataset_name} (Consecutive Training)")
+    print(f" Source directory: {raw_data_dir}")
     print(f"{'='*60}")
     
     # Load optimized hyperparameters
@@ -155,10 +155,10 @@ def process_and_train_dataset_consecutive(raw_data_dir, dataset_name, study_time
     files = sorted([f for f in os.listdir(raw_data_dir) if os.path.isfile(os.path.join(raw_data_dir, f))])
     
     if not files:
-        print(f"❌ No files found in {raw_data_dir}")
+        print(f" No files found in {raw_data_dir}")
         return
     
-    print(f"📋 Found {len(files)} files to process consecutively:")
+    print(f" Found {len(files)} files to process consecutively:")
     for i, file in enumerate(files, 1):
         print(f"   {i}. {file}")
     print()
@@ -167,21 +167,21 @@ def process_and_train_dataset_consecutive(raw_data_dir, dataset_name, study_time
         input_file = os.path.join(raw_data_dir, file)
         dataset_id = file.split('.')[0]
         
-        print(f"\n📄 Processing file {i+1}/{len(files)}: {file}")
-        print(f"🔄 Converting to NER format...")
+        print(f"\n Processing file {i+1}/{len(files)}: {file}")
+        print(f" Converting to NER format...")
         
         # Convert file to NER format
         convert_file(input_file)
           # Check if conversion was successful
         result_json_path = os.path.join(DATA_DIR, "json", "result.json")
         if not os.path.exists(result_json_path):
-            print(f"❌ Conversion failed for {file}, skipping...")
+            print(f" Conversion failed for {file}, skipping...")
             continue
           
         # Create dataset output directory
         dataset_output_dir = os.path.join(DATA_DIR, "ds", model_suffix, dataset_id)
         
-        print(f"🏗️  Creating NER dataset with{'out' if not include_title_tags else ''} TITLE tags...")
+        print(f"Creating NER dataset with{'out' if not include_title_tags else ''} TITLE tags...")
         
         # Create NER dataset - this will save both to tokenized_train and ds directory
         create_ner_dataset(
@@ -197,19 +197,19 @@ def process_and_train_dataset_consecutive(raw_data_dir, dataset_name, study_time
         
         # Verify dataset was created
         if not os.path.exists(training_dataset_path):
-            print(f"❌ Dataset creation failed for {dataset_id}, skipping training...")
+            print(f" Dataset creation failed for {dataset_id}, skipping training...")
             continue
         
         # Set up model paths for consecutive training
         output_dir = os.path.join(MODELS_DIR, f"roberta-finetuned-ner-{model_suffix}-v{version}")
         
         # Display training information
-        print(f"\n🚀 Starting consecutive training (iteration {i+1}/{len(files)})...")
-        print(f"📊 Dataset: {training_dataset_path}")
-        print(f"🤖 Model type: {'Complex' if not use_simplified_model else 'Simplified'}")
-        print(f"🏷️  Include TITLE tags: {include_title_tags}")
-        print(f"🔗 Base model: {current_model_name}")
-        print(f"💾 Output directory: {output_dir}")
+        print(f"\n Starting consecutive training (iteration {i+1}/{len(files)})...")
+        print(f" Dataset: {training_dataset_path}")
+        print(f" Model type: {'Complex' if not use_simplified_model else 'Simplified'}")
+        print(f"  Include TITLE tags: {include_title_tags}")
+        print(f" Base model: {current_model_name}")
+        print(f" Output directory: {output_dir}")
         
         # Save label configuration for this model
         save_label_config(output_dir, include_title_tags)        
@@ -225,25 +225,25 @@ def process_and_train_dataset_consecutive(raw_data_dir, dataset_name, study_time
                 include_title_tags=include_title_tags
             )
             
-            print(f"✅ Training completed successfully!")
+            print(f" Training completed successfully!")
             if results and isinstance(results, dict):
                 person_f1 = results.get("person_f1", results.get("eval_person_f1", "N/A"))
-                print(f"📈 Person F1 Score: {person_f1}")
+                print(f" Person F1 Score: {person_f1}")
               # Update current_model_name for next iteration (consecutive training)
             current_model_name = output_dir
             version += 1
             
-            print(f"🔗 Next model will use: {current_model_name}")
+            print(f" Next model will use: {current_model_name}")
             
         except Exception as e:
-            print(f"❌ Training failed for {dataset_id}: {str(e)}")
-            print(f"⚠️  Consecutive training chain broken. Subsequent models will start from roberta-base.")
+            print(f" Training failed for {dataset_id}: {str(e)}")
+            print(f"  Consecutive training chain broken. Subsequent models will start from roberta-base.")
             # Reset to base model if training fails to avoid using corrupted model
             current_model_name = "roberta-base"
             continue
     
-    print(f"\n✅ Completed consecutive processing of {dataset_name} dataset")
-    print(f"🔗 Final model: {current_model_name if current_model_name != 'roberta-base' else 'No models trained successfully'}")
+    print(f"\n Completed consecutive processing of {dataset_name} dataset")
+    print(f" Final model: {current_model_name if current_model_name != 'roberta-base' else 'No models trained successfully'}")
     
     # Return the final model name and next version for chaining across datasets
     return current_model_name, version
@@ -251,8 +251,8 @@ def process_and_train_dataset_consecutive(raw_data_dir, dataset_name, study_time
 def process_and_train_dataset_independent(raw_data_dir, dataset_name, study_timestamp, use_simplified_model, epochs, include_title_tags, starting_version=1):
     """Process raw data and train independent models for each dataset (original behavior)"""
     print(f"\n{'='*60}")
-    print(f"🔄 Processing dataset: {dataset_name} (Independent Training)")
-    print(f"📁 Source directory: {raw_data_dir}")
+    print(f" Processing dataset: {dataset_name} (Independent Training)")
+    print(f" Source directory: {raw_data_dir}")
     print(f"{'='*60}")
     
     # Load optimized hyperparameters
@@ -272,10 +272,10 @@ def process_and_train_dataset_independent(raw_data_dir, dataset_name, study_time
     files = sorted([f for f in os.listdir(raw_data_dir) if os.path.isfile(os.path.join(raw_data_dir, f))])
     
     if not files:
-        print(f"❌ No files found in {raw_data_dir}")
+        print(f" No files found in {raw_data_dir}")
         return
     
-    print(f"📋 Found {len(files)} files to process independently:")
+    print(f" Found {len(files)} files to process independently:")
     for i, file in enumerate(files, 1):
         print(f"   {i}. {file}")
     print()
@@ -284,8 +284,8 @@ def process_and_train_dataset_independent(raw_data_dir, dataset_name, study_time
         input_file = os.path.join(raw_data_dir, file)
         dataset_id = file.split('.')[0]
         
-        print(f"\n📄 Processing file {i+1}/{len(files)}: {file}")
-        print(f"🔄 Converting to NER format...")
+        print(f"\n Processing file {i+1}/{len(files)}: {file}")
+        print(f" Converting to NER format...")
         
         # Convert file to NER format
         convert_file(input_file)
@@ -293,13 +293,13 @@ def process_and_train_dataset_independent(raw_data_dir, dataset_name, study_time
         # Check if conversion was successful
         result_json_path = os.path.join(DATA_DIR, "json", "result.json")
         if not os.path.exists(result_json_path):
-            print(f"❌ Conversion failed for {file}, skipping...")
+            print(f" Conversion failed for {file}, skipping...")
             continue
         
         # Create dataset output directory
         dataset_output_dir = os.path.join(DATA_DIR, "ds", model_suffix, dataset_id)
         
-        print(f"🏗️  Creating NER dataset with{'out' if not include_title_tags else ''} TITLE tags...")
+        print(f"  Creating NER dataset with{'out' if not include_title_tags else ''} TITLE tags...")
         
         # Create NER dataset
         create_ner_dataset(
@@ -315,19 +315,19 @@ def process_and_train_dataset_independent(raw_data_dir, dataset_name, study_time
         
         # Verify dataset was created
         if not os.path.exists(training_dataset_path):
-            print(f"❌ Dataset creation failed for {dataset_id}, skipping training...")
+            print(f" Dataset creation failed for {dataset_id}, skipping training...")
             continue
         
         # Set up model paths for independent training (always start from roberta-base)
         output_dir = os.path.join(MODELS_DIR, f"roberta-finetuned-ner-{model_suffix}-v{version}")
         
         # Display training information
-        print(f"\n🚀 Starting independent training (model {i+1}/{len(files)})...")
-        print(f"📊 Dataset: {training_dataset_path}")
-        print(f"🤖 Model type: {'Complex' if not use_simplified_model else 'Simplified'}")
-        print(f"🏷️  Include TITLE tags: {include_title_tags}")
-        print(f"🔗 Base model: roberta-base")
-        print(f"💾 Output directory: {output_dir}")
+        print(f"\n Starting independent training (model {i+1}/{len(files)})...")
+        print(f" Dataset: {training_dataset_path}")
+        print(f" Model type: {'Complex' if not use_simplified_model else 'Simplified'}")
+        print(f"  Include TITLE tags: {include_title_tags}")
+        print(f" Base model: roberta-base")
+        print(f" Output directory: {output_dir}")
         
         # Save label configuration for this model
         save_label_config(output_dir, include_title_tags)
@@ -344,18 +344,18 @@ def process_and_train_dataset_independent(raw_data_dir, dataset_name, study_time
                 include_title_tags=include_title_tags
             )
             
-            print(f"✅ Training completed successfully!")
+            print(f" Training completed successfully!")
             if results and isinstance(results, dict):
                 person_f1 = results.get("person_f1", results.get("eval_person_f1", "N/A"))
-                print(f"📈 Person F1 Score: {person_f1}")
+                print(f" Person F1 Score: {person_f1}")
             
             version += 1
             
         except Exception as e:
-            print(f"❌ Training failed for {dataset_id}: {str(e)}")
+            print(f" Training failed for {dataset_id}: {str(e)}")
             continue
     
-    print(f"\n✅ Completed independent processing of {dataset_name} dataset")
+    print(f"\n Completed independent processing of {dataset_name} dataset")
     
     # Return next version for continuity across datasets
     return version
@@ -381,13 +381,13 @@ def process_and_train_dataset(raw_data_dir, dataset_name, study_timestamp, use_s
 
 def run_full_pipeline():
     """Run the complete data processing and training pipeline"""
-    print("🚀 Starting NER Training Pipeline")
+    print(" Starting NER Training Pipeline")
     print("=" * 60)
     
     # Apply test mode adjustment
     epochs = 3 if TEST_MODE else TRAINING_EPOCHS
     
-    print(f"📋 Configuration:")
+    print(f" Configuration:")
     print(f"   • Optuna Study: {OPTUNA_STUDY_TIMESTAMP}")
     print(f"   • Model Type: {'Complex' if not USE_SIMPLIFIED_MODEL else 'Simplified'}")
     print(f"   • Training Mode: {'Consecutive (Incremental)' if CONSECUTIVE_TRAINING else 'Independent Models'}")
@@ -398,14 +398,14 @@ def run_full_pipeline():
     print("=" * 60)
     
     # Validate environment
-    print("🔍 Validating environment...")
+    print(" Validating environment...")
     env_issues = validate_environment(OPTUNA_STUDY_TIMESTAMP)
     if env_issues:
-        print("❌ Environment validation failed:")
+        print(" Environment validation failed:")
         for issue in env_issues:
             print(f"   • {issue}")
-        print("\n💡 Please ensure all required files and directories are present before running the pipeline.")
-        return    print("✅ Environment validation passed")
+        print("\n Please ensure all required files and directories are present before running the pipeline.")
+        return    print(" Environment validation passed")
     # Validate configuration consistency
     validate_configuration_consistency()
     
@@ -424,7 +424,7 @@ def run_full_pipeline():
             current_model_name = final_model
         current_version = next_version
     else:
-        print(f"⚠️  Social dataset directory not found or empty: {input_file_social}")
+        print(f"  Social dataset directory not found or empty: {input_file_social}")
     
     # Process General dataset (may include TITLE tags)
     if os.path.exists(input_file_general) and os.listdir(input_file_general):
@@ -433,11 +433,11 @@ def run_full_pipeline():
             epochs, INCLUDE_TITLE_TAGS, CONSECUTIVE_TRAINING, current_model_name, current_version
         )
     else:
-        print(f"⚠️  General dataset directory not found or empty: {input_file_general}")
+        print(f"  General dataset directory not found or empty: {input_file_general}")
     
-    print("\n🎉 Pipeline completed successfully!")
-    print("📁 Check the models/ directory for trained models")
-    print("📊 Check the logs/ directory for training logs")
+    print("\n Pipeline completed successfully!")
+    print(" Check the models/ directory for trained models")
+    print(" Check the logs/ directory for training logs")
 
 def run_pipeline_with_title_settings(include_title_tags=None):
     """
@@ -466,20 +466,20 @@ def run_both_pipelines():
     Convenience function to run both pipelines - one with TITLE tags and one without.
     This is useful for comparing model performance with different tag schemas.
     """
-    print("🎯 Running BOTH pipelines - with and without TITLE tags")
+    print(" Running BOTH pipelines - with and without TITLE tags")
     print("=" * 60)
     
-    print("\n🚀 FIRST RUN: Training with PERSON tags only (NO-TITLE)")
+    print("\n FIRST RUN: Training with PERSON tags only (NO-TITLE)")
     print("=" * 60)
     run_pipeline_with_title_settings(include_title_tags=False)
     
     print("\n" + "=" * 80)
-    print("🚀 SECOND RUN: Training with PERSON and TITLE tags")
+    print(" SECOND RUN: Training with PERSON and TITLE tags")
     print("=" * 60)
     run_pipeline_with_title_settings(include_title_tags=True)
     
-    print("\n🎉 Both pipelines completed!")
-    print("📁 Check the models/ directory for trained models:")
+    print("\n Both pipelines completed!")
+    print(" Check the models/ directory for trained models:")
     print("   • Models with 'NO-TITLE' are trained without TITLE tags")
     print("   • Models with 'TITLE' are trained with TITLE tags")
 
@@ -488,7 +488,7 @@ def validate_configuration_consistency():
     Validate that all configuration files are properly coordinated.
     This function checks for potential conflicts between different configuration sources.
     """
-    print("🔍 Validating configuration consistency...")
+    print(" Validating configuration consistency...")
     
     # Import the label configurations
     from utils.label_config import get_label_config, LABELS_WITH_TITLE, LABELS_WITHOUT_TITLE
@@ -503,33 +503,33 @@ def validate_configuration_consistency():
     
     # Check label mappings consistency
     if LABELS_WITH_TITLE != OUTPUT_TAGS_WITH_TITLE:
-        warnings.append("⚠️  LABELS_WITH_TITLE in label_config.py doesn't match OUTPUT_TAGS_WITH_TITLE in preprocess.py")
+        warnings.append("  LABELS_WITH_TITLE in label_config.py doesn't match OUTPUT_TAGS_WITH_TITLE in preprocess.py")
     
     if LABELS_WITHOUT_TITLE != OUTPUT_TAGS_PERSON_ONLY:
-        warnings.append("⚠️  LABELS_WITHOUT_TITLE in label_config.py doesn't match OUTPUT_TAGS_PERSON_ONLY in preprocess.py")
+        warnings.append("  LABELS_WITHOUT_TITLE in label_config.py doesn't match OUTPUT_TAGS_PERSON_ONLY in preprocess.py")
     
     # Check if config.py hardcoded labels match any of our dynamic configs
     if CONFIG_LABELS == LABELS_WITH_TITLE:
-        print("✅ config.py LABELS matches TITLE configuration")
+        print(" config.py LABELS matches TITLE configuration")
     elif CONFIG_LABELS == LABELS_WITHOUT_TITLE:
-        print("✅ config.py LABELS matches NO-TITLE configuration")
+        print(" config.py LABELS matches NO-TITLE configuration")
     else:
-        warnings.append("⚠️  config.py LABELS doesn't match either dynamic configuration")
+        warnings.append("  config.py LABELS doesn't match either dynamic configuration")
     
     # Validate current configuration
     current_config = get_label_config(INCLUDE_TITLE_TAGS)
-    print(f"✅ Current configuration: {'TITLE' if INCLUDE_TITLE_TAGS else 'NO-TITLE'}")
+    print(f" Current configuration: {'TITLE' if INCLUDE_TITLE_TAGS else 'NO-TITLE'}")
     print(f"   Labels: {list(current_config['labels'].keys())}")
     print(f"   Number of labels: {current_config['num_labels']}")
     
     # Report warnings
     if warnings:
-        print("\n⚠️  Configuration warnings found:")
+        print("\n  Configuration warnings found:")
         for warning in warnings:
             print(f"   {warning}")
-        print("\n💡 Note: train.py handles these dynamically, but consistency is recommended.")
+        print("\n Note: train.py handles these dynamically, but consistency is recommended.")
     else:
-        print("✅ All configurations are consistent!")
+        print(" All configurations are consistent!")
     
     return len(warnings) == 0
 

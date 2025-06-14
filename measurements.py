@@ -104,7 +104,7 @@ def simple_inference(model_path, dataset_path):
         print(f"ERROR: Still have invalid labels: {invalid_labels}")
         return None
     else:
-        print("✓ All labels are valid for the model")
+        print(" All labels are valid for the model")
     
     # Now test on the full dataset instead of just 10 examples
     print(f"Using full test set: {len(dataset['test'])} examples")# Load model and tokenizer
@@ -147,44 +147,44 @@ def simple_inference(model_path, dataset_path):
                 if saved_state_dict["classifier.token_classifier.weight"].shape == current_state_dict["classifier.weight"].shape:
                     compatible_weights["classifier.weight"] = saved_state_dict["classifier.token_classifier.weight"]
                     loaded_count += 1
-                    print("✓ Loaded: classifier.weight (from classifier.token_classifier.weight)")
+                    print(" Loaded: classifier.weight (from classifier.token_classifier.weight)")
                 else:
-                    print(f"✗ Skipped: classifier.token_classifier.weight (shape mismatch: {saved_state_dict['classifier.token_classifier.weight'].shape} vs {current_state_dict['classifier.weight'].shape})")
+                    print(f"Skipped: classifier.token_classifier.weight (shape mismatch: {saved_state_dict['classifier.token_classifier.weight'].shape} vs {current_state_dict['classifier.weight'].shape})")
             
             if "classifier.token_classifier.bias" in saved_state_dict and "classifier.bias" in current_state_dict:
                 if saved_state_dict["classifier.token_classifier.bias"].shape == current_state_dict["classifier.bias"].shape:
                     compatible_weights["classifier.bias"] = saved_state_dict["classifier.token_classifier.bias"]
                     loaded_count += 1
-                    print("✓ Loaded: classifier.bias (from classifier.token_classifier.bias)")
+                    print(" Loaded: classifier.bias (from classifier.token_classifier.bias)")
                 else:
-                    print(f"✗ Skipped: classifier.token_classifier.bias (shape mismatch)")
+                    print(f"Skipped: classifier.token_classifier.bias (shape mismatch)")
             
             # Try span_classifier weights which might be the main trained classifier (can override token_classifier)
             if "classifier.span_classifier.weight" in saved_state_dict and "classifier.weight" in current_state_dict:
                 if saved_state_dict["classifier.span_classifier.weight"].shape == current_state_dict["classifier.weight"].shape:
                     compatible_weights["classifier.weight"] = saved_state_dict["classifier.span_classifier.weight"]
                     loaded_count += 1
-                    print("✓ Loaded: classifier.weight (from classifier.span_classifier.weight) - OVERRIDING token_classifier")
+                    print(" Loaded: classifier.weight (from classifier.span_classifier.weight) - OVERRIDING token_classifier")
                 else:
-                    print(f"✗ Skipped: classifier.span_classifier.weight (shape mismatch: {saved_state_dict['classifier.span_classifier.weight'].shape} vs {current_state_dict['classifier.weight'].shape})")
+                    print(f"Skipped: classifier.span_classifier.weight (shape mismatch: {saved_state_dict['classifier.span_classifier.weight'].shape} vs {current_state_dict['classifier.weight'].shape})")
             
             if "classifier.span_classifier.bias" in saved_state_dict and "classifier.bias" in current_state_dict:
                 if saved_state_dict["classifier.span_classifier.bias"].shape == current_state_dict["classifier.bias"].shape:
                     compatible_weights["classifier.bias"] = saved_state_dict["classifier.span_classifier.bias"]
                     loaded_count += 1
-                    print("✓ Loaded: classifier.bias (from classifier.span_classifier.bias) - OVERRIDING token_classifier")
+                    print(" Loaded: classifier.bias (from classifier.span_classifier.bias) - OVERRIDING token_classifier")
                 else:
-                    print(f"✗ Skipped: classifier.span_classifier.bias (shape mismatch)")
+                    print(f"Skipped: classifier.span_classifier.bias (shape mismatch)")
             
             # Load other compatible weights (RoBERTa backbone)
             for key, value in saved_state_dict.items():
                 if key.startswith('roberta.') and key in current_state_dict and current_state_dict[key].shape == value.shape:
                     compatible_weights[key] = value
                     loaded_count += 1
-                    print(f"✓ Loaded: {key}")
+                    print(f" Loaded: {key}")
                 elif not key.startswith('roberta.') and not key.startswith('classifier.token_classifier.'):
                     if key not in ['classifier.weight', 'classifier.bias']:  # Skip already handled
-                        print(f"✗ Skipped: {key} (not compatible with simple model)")
+                        print(f"Skipped: {key} (not compatible with simple model)")
             
             print(f"Attempting to load {len(compatible_weights)} compatible weight tensors")
               # Load the compatible weights

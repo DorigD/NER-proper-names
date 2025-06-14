@@ -1,0 +1,22 @@
+Person NER Evaluation Summary Report
+==================================================
+
+Evaluation Date: 2025-06-13 20:32:50
+Total Evaluations: 10
+Failed Evaluations: 0
+
+Models Evaluated:
+  - roberta-large-ner-english
+  - xlm-roberta-large-finetuned-conll03-english
+
+Datasets Evaluated:
+  - a
+  - conllpp_train
+  - KAGGLE
+  - ritter
+  - WNUT
+
+Aggregated Results:
+                                 model_type  num_datasets  person_f1_mean  person_f1_std  person_precision_mean  person_recall_mean  model_size_mb  avg_inference_time_per_sample  avg_sentences_per_second
+                  roberta-large-ner-english             5          0.7726         0.1556                 0.7748              0.7984      1351.6055                         0.0195                   51.3773
+xlm-roberta-large-finetuned-conll03-english             5          0.7712         0.1514                 0.7824              0.7901      2131.8399                         0.0201                   49.7212

@@ -350,14 +350,14 @@ def run_optimization(n_trials=15, continue_from=None, phase="phase1", focused_ra
 def run_two_phase_optimization(continue_from_timestamp=None):
     """Run the complete two-phase optimization pipeline"""
     
-    print("🚀 Starting Two-Phase Hyperparameter Optimization")
+    print(" Starting Two-Phase Hyperparameter Optimization")
     print("=" * 60)
     
     # Check if we should resume from an existing study
     if continue_from_timestamp:
         study_dir = os.path.join(LOGS_DIR, f"optuna_study_{continue_from_timestamp}")
         if os.path.exists(os.path.join(study_dir, 'optuna_study.db')):
-            print(f"📂 Found existing study: {continue_from_timestamp}")
+            print(f" Found existing study: {continue_from_timestamp}")
             
             # Load existing study to check progress
             storage_url = f"sqlite:///{os.path.join(study_dir, 'optuna_study.db')}"
@@ -368,11 +368,11 @@ def run_two_phase_optimization(continue_from_timestamp=None):
                 )
                 
                 completed_trials = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
-                print(f"📊 Existing study has {len(completed_trials)} completed trials")
+                print(f" Existing study has {len(completed_trials)} completed trials")
                 
                 # Check if Phase 1 is complete (assume Phase 1 if < 20 trials)
                 if len(completed_trials) < 20:
-                    print("🔄 Resuming Phase 1...")
+                    print(" Resuming Phase 1...")
                     remaining_trials = 15 - len(completed_trials)
                     if remaining_trials > 0:
                         best_params_1, best_f1_1, study_1 = run_optimization(
@@ -384,25 +384,25 @@ def run_two_phase_optimization(continue_from_timestamp=None):
                         best_params_1, best_f1_1, study_1 = study.best_params, study.best_value, study
                     
                     timestamp = continue_from_timestamp
-                    print(f"✅ Phase 1 completed! Best F1: {best_f1_1:.4f}")
+                    print(f" Phase 1 completed! Best F1: {best_f1_1:.4f}")
                     
                 else:
-                    print("✅ Phase 1 already completed")
+                    print(" Phase 1 already completed")
                     best_params_1, best_f1_1 = study.best_params, study.best_value
                     timestamp = continue_from_timestamp
                 
             except Exception as e:
-                print(f"❌ Error loading existing study: {e}")
-                print("🔄 Starting fresh Phase 1...")
+                print(f" Error loading existing study: {e}")
+                print(" Starting fresh Phase 1...")
                 best_params_1, best_f1_1, study_1 = run_optimization(n_trials=15, phase="phase1")
                 timestamp = study_1.study_name.split('_')[-1]
         else:
-            print(f"❌ Study {continue_from_timestamp} not found, starting fresh...")
+            print(f" Study {continue_from_timestamp} not found, starting fresh...")
             best_params_1, best_f1_1, study_1 = run_optimization(n_trials=15, phase="phase1")
             timestamp = study_1.study_name.split('_')[-1]
     else:
         # Fresh start - Phase 1
-        print("\n📊 PHASE 1: Broad Exploration")
+        print("\n PHASE 1: Broad Exploration")
         print("Running 15 trials with broad parameter ranges...")
         
         best_params_1, best_f1_1, study_1 = run_optimization(
@@ -412,19 +412,19 @@ def run_two_phase_optimization(continue_from_timestamp=None):
         
         # Extract timestamp from study
         timestamp = study_1.study_name.split('_')[-1]
-        print(f"\n✅ Phase 1 completed! Best F1: {best_f1_1:.4f}")
+        print(f"\n Phase 1 completed! Best F1: {best_f1_1:.4f}")
     
-    print(f"📁 Results saved to: logs/optuna_study_{timestamp}/")
+    print(f" Results saved to: logs/optuna_study_{timestamp}/")
     
     # Analyze Phase 1 results
-    print("\n🔍 ANALYZING PHASE 1 RESULTS...")
+    print("\n ANALYZING PHASE 1 RESULTS...")
     focused_ranges = analyze_phase1_results(timestamp)
     
     if focused_ranges:
-        print("✅ Phase 1 analysis completed - focused ranges generated")
+        print(" Phase 1 analysis completed - focused ranges generated")
         
         # Phase 2: Focused search
-        print("\n🎯 PHASE 2: Focused Search")
+        print("\n PHASE 2: Focused Search")
         print("Running 25 trials with focused parameter ranges...")
         
         best_params_2, best_f1_2, study_2 = run_optimization(
@@ -434,22 +434,22 @@ def run_two_phase_optimization(continue_from_timestamp=None):
             focused_ranges=focused_ranges
         )
         
-        print(f"\n✅ Phase 2 completed! Best F1: {best_f1_2:.4f}")
+        print(f"\n Phase 2 completed! Best F1: {best_f1_2:.4f}")
         
         # Summary
-        print(f"\n📈 OPTIMIZATION SUMMARY:")
+        print(f"\n OPTIMIZATION SUMMARY:")
         print(f"   Phase 1 Best F1: {best_f1_1:.4f}")
         print(f"   Phase 2 Best F1: {best_f1_2:.4f}")
         print(f"   Improvement: {((best_f1_2 - best_f1_1) / best_f1_1 * 100):+.2f}%")
-        print(f"\n🎉 Two-phase optimization completed!")
-        print(f"📁 All results in: logs/optuna_study_{timestamp}/")
-        print(f"\n💡 To train final model with best parameters:")
+        print(f"\n Two-phase optimization completed!")
+        print(f" All results in: logs/optuna_study_{timestamp}/")
+        print(f"\n To train final model with best parameters:")
         print(f"   python scripts/train.py --config logs/optuna_study_{timestamp}/best_params.json")
         
         return best_params_2, best_f1_2
     
     else:
-        print("❌ Phase 1 analysis failed - cannot proceed to Phase 2")
+        print(" Phase 1 analysis failed - cannot proceed to Phase 2")
         return best_params_1, best_f1_1
 
 # =============================================================================
@@ -482,50 +482,50 @@ if __name__ == "__main__":
     
     if phase == "both":
         # Run complete two-phase pipeline
-        print("🚀 Running complete two-phase optimization pipeline")
+        print(" Running complete two-phase optimization pipeline")
         # Pass the continue_from timestamp if provided
         run_two_phase_optimization(continue_from_timestamp=continue_from)
         
     elif phase == "phase1":
         # Run Phase 1 only
         n_trials = trials or 15
-        print(f"🚀 Running Phase 1 with {n_trials} trials")
+        print(f" Running Phase 1 with {n_trials} trials")
         best_params, best_f1, study = run_optimization(n_trials=n_trials, phase="phase1")
         timestamp = study.study_name.split('_')[-1]
-        print(f"✅ Phase 1 completed! Best F1: {best_f1:.4f}")
-        print(f"📁 Results saved to: logs/optuna_study_{timestamp}/")
-        print(f"\n💡 To run Phase 2, edit these parameters at the top of the script:")
+        print(f" Phase 1 completed! Best F1: {best_f1:.4f}")
+        print(f" Results saved to: logs/optuna_study_{timestamp}/")
+        print(f"\n To run Phase 2, edit these parameters at the top of the script:")
         print(f"   PHASE = 'phase2'")
         print(f"   CONTINUE_FROM = '{timestamp}'")
         
     elif phase == "phase2":
         # Run Phase 2 only
         if not continue_from:
-            print("❌ Error: CONTINUE_FROM timestamp required for phase2")
+            print(" Error: CONTINUE_FROM timestamp required for phase2")
             print("   Set CONTINUE_FROM = 'YYYYMMDD_HHMMSS' from your Phase 1 run")
             sys.exit(1)
             
         # Analyze Phase 1 first
-        print("🔍 Analyzing Phase 1 results...")
+        print(" Analyzing Phase 1 results...")
         focused_ranges = analyze_phase1_results(continue_from)
         
         if focused_ranges:
             n_trials = trials or 25
-            print(f"🎯 Running Phase 2 with {n_trials} trials")
+            print(f" Running Phase 2 with {n_trials} trials")
             best_params, best_f1, study = run_optimization(
                 n_trials=n_trials,
                 continue_from=continue_from,
                 phase="phase2",
                 focused_ranges=focused_ranges
             )
-            print(f"✅ Phase 2 completed! Best F1: {best_f1:.4f}")
-            print(f"📁 Results saved to: logs/optuna_study_{continue_from}/")
-            print(f"\n💡 To train final model:")
+            print(f" Phase 2 completed! Best F1: {best_f1:.4f}")
+            print(f" Results saved to: logs/optuna_study_{continue_from}/")
+            print(f"\n To train final model:")
             print(f"   python scripts/train.py --config logs/optuna_study_{continue_from}/best_params.json")
         else:
-            print("❌ Phase 1 analysis failed - cannot run Phase 2")
+            print(" Phase 1 analysis failed - cannot run Phase 2")
             sys.exit(1)
     
     else:
-        print(f"❌ Error: Invalid phase '{phase}'. Use 'both', 'phase1', or 'phase2'")
+        print(f" Error: Invalid phase '{phase}'. Use 'both', 'phase1', or 'phase2'")
         sys.exit(1)

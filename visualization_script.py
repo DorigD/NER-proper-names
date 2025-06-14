@@ -44,12 +44,12 @@ def load_latest_results():
     
     # Get the most recent file
     latest_file = max(csv_files, key=lambda x: x.stat().st_mtime)
-    print(f"📂 Loading results from: {latest_file.name}")
+    print(f" Loading results from: {latest_file.name}")
     
     df = pd.read_csv(latest_file)
-    print(f"📊 Loaded {len(df)} evaluation records")
-    print(f"📈 Models: {df['model_type'].unique()}")
-    print(f"📋 Datasets: {df['dataset'].unique()}")
+    print(f" Loaded {len(df)} evaluation records")
+    print(f" Models: {df['model_type'].unique()}")
+    print(f" Datasets: {df['dataset'].unique()}")
     
     return df, latest_file.stem
 
@@ -130,7 +130,7 @@ def create_performance_comparison(df_results, results_timestamp):
     # Save the chart
     fig.write_html(CHARTS_PATH / f"performance_comparison_{results_timestamp}.html")
     fig.write_image(CHARTS_PATH / f"performance_comparison_{results_timestamp}.png", width=1200, height=800)
-    print("✅ Performance comparison chart saved!")
+    print(" Performance comparison chart saved!")
     
     return fig
 
@@ -264,7 +264,7 @@ def create_summary_dashboard(df_results, df_aggregated, results_timestamp):
     # Save the dashboard
     fig.write_html(CHARTS_PATH / f"summary_dashboard_{results_timestamp}.html")
     fig.write_image(CHARTS_PATH / f"summary_dashboard_{results_timestamp}.png", width=1400, height=1200)
-    print("✅ Summary dashboard saved!")
+    print(" Summary dashboard saved!")
     
     return fig
 
@@ -319,7 +319,7 @@ def create_radar_chart(df_aggregated, results_timestamp):
     # Save the chart
     fig.write_html(CHARTS_PATH / f"radar_comparison_{results_timestamp}.html")
     fig.write_image(CHARTS_PATH / f"radar_comparison_{results_timestamp}.png", width=800, height=600)
-    print("✅ Radar chart saved!")
+    print(" Radar chart saved!")
     
     return fig
 
@@ -412,65 +412,65 @@ All charts are available in both HTML (interactive) and PNG (static) formats.
     with open(report_path, 'w') as f:
         f.write(report)
     
-    print(f"📄 Summary report saved to: {report_path}")
+    print(f" Summary report saved to: {report_path}")
     return report
 
 def main():
     """Main function to run the visualization pipeline."""
     
-    print("🚀 Starting NER Model Evaluation Visualization Pipeline...")
+    print(" Starting NER Model Evaluation Visualization Pipeline...")
     print("=" * 60)
     
     # Load data
-    print("\n📂 Loading evaluation results...")
+    print("\n Loading evaluation results...")
     df_results, results_timestamp = load_latest_results()
     
     # Calculate aggregated statistics
-    print("\n📊 Calculating aggregated statistics...")
+    print("\n Calculating aggregated statistics...")
     df_aggregated = calculate_aggregated_stats(df_results)
-    print("✅ Aggregated statistics calculated")
+    print(" Aggregated statistics calculated")
     
     # Create visualizations
     print("\n🎨 Creating visualizations...")
     
     # 1. Performance comparison
-    print("  📈 Creating performance comparison chart...")
+    print("   Creating performance comparison chart...")
     create_performance_comparison(df_results, results_timestamp)
     
     # 2. Radar chart
-    print("  🎯 Creating radar chart...")
+    print("   Creating radar chart...")
     create_radar_chart(df_aggregated, results_timestamp)
     
     # 3. Summary dashboard
-    print("  📊 Creating summary dashboard...")
+    print("   Creating summary dashboard...")
     create_summary_dashboard(df_results, df_aggregated, results_timestamp)
     
     # 4. Generate report
-    print("  📄 Generating summary report...")
+    print("   Generating summary report...")
     summary_report = generate_summary_report(df_results, df_aggregated, results_timestamp)
     
     # Final summary
-    print("\n🎉 Visualization Pipeline Complete!")
+    print("\n Visualization Pipeline Complete!")
     print("=" * 50)
     
-    print(f"\n📁 Generated files in {CHARTS_PATH}:")
+    print(f"\n Generated files in {CHARTS_PATH}:")
     chart_files = list(CHARTS_PATH.glob(f"*{results_timestamp}*"))
     for file_path in sorted(chart_files):
         file_size = file_path.stat().st_size / 1024  # Size in KB
-        print(f"  📊 {file_path.name} ({file_size:.1f} KB)")
+        print(f"   {file_path.name} ({file_size:.1f} KB)")
     
-    print(f"\n📈 Total files generated: {len(chart_files)}")
-    print(f"📊 Interactive HTML files: {len([f for f in chart_files if f.suffix == '.html'])}")
+    print(f"\n Total files generated: {len(chart_files)}")
+    print(f" Interactive HTML files: {len([f for f in chart_files if f.suffix == '.html'])}")
     print(f"🖼️  Static PNG images: {len([f for f in chart_files if f.suffix == '.png'])}")
-    print(f"📄 Text reports: {len([f for f in chart_files if f.suffix == '.txt'])}")
+    print(f" Text reports: {len([f for f in chart_files if f.suffix == '.txt'])}")
     
-    print(f"\n💡 Next Steps:")
+    print(f"\n Next Steps:")
     print(f"  1. Open the HTML files in your browser for interactive exploration")
     print(f"  2. Use PNG files for presentations or reports")
     print(f"  3. Review the text summary report for key insights")
     print(f"  4. Share the summary dashboard for a comprehensive overview")
     
-    print(f"\n🔗 Quick Access:")
+    print(f"\n Quick Access:")
     print(f"  Dashboard: {CHARTS_PATH / f'summary_dashboard_{results_timestamp}.html'}")
     print(f"  Report: {CHARTS_PATH / f'evaluation_report_{results_timestamp}.txt'}")
 
